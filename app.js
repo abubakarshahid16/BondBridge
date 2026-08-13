@@ -1,5 +1,5 @@
-const STORAGE_KEY = "bondbridge-verified-live-v2";
-const LEGACY_STORAGE_KEYS = ["bondbridge-verified-v1"];
+const STORAGE_KEY = "bondbridge-verified-live-v3";
+const LEGACY_STORAGE_KEYS = ["bondbridge-verified-v1", "bondbridge-verified-live-v2"];
 
 const views = [
   ["dashboard", "Home", "home"],
@@ -175,9 +175,11 @@ function createInitialState() {
     profiles: [],
     requests: [],
     connections: [],
+    connectionRows: [],
     chats: {},
     family: [],
     reports: [],
+    proofDocuments: [],
     moderationLog: [
       "Bad-language filter enabled for all chats.",
       "New users limited to 5 outgoing requests per day until role proof is verified.",
@@ -322,6 +324,70 @@ function profileById(id) {
 
 function requestFor(profileId) {
   return state.requests.find((request) => request.profileId === profileId);
+}
+
+function isSignedIn() {
+  return Boolean(authAccessToken && state.auth.session && state.auth.session.signedIn);
+}
+
+function requireSignedIn(action) {
+  if (isSignedIn()) return true;
+  state.view = "auth";
+  toast(`Log in before ${action}.`);
+  saveState();
+  render();
+  return false;
+}
+
+function otherUserIdForConnection(row) {
+  if (!row) return "";
+  return row.requester_id === state.currentUser.id ? row.recipient_id : row.requester_id;
+}
+
+function syncConnectionRows(rows = []) {
+  state.connectionRows = rows.filter(Boolean);
+  state.requests = [];
+  state.connections = [];
+  state.connectionRows.forEach((row) => {
+    const profileId = otherUserIdForConnection(row);
+    if (!profileId) return;
+    if (row.status === "accepted") {
+      if (!state.connections.includes(profileId)) state.connections.push(profileId);
+      return;
+    }
+    if (row.status === "pending") {
+      state.requests.push({
+        id: row.id,
+        profileId,
+        direction: row.recipient_id === state.currentUser.id ? "incoming" : "outgoing",
+        status: "pending",
+        note: row.note || "Respectful connection request.",
+        createdAt: String(row.created_at || today()).slice(0, 10),
+      });
+    }
+  });
+}
+
+function applyProfileRowToCurrentUser(row) {
+  if (!row) return;
+  state.currentUser.id = row.id || state.currentUser.id;
+  state.currentUser.name = row.full_name || state.currentUser.name;
+  state.currentUser.age = row.age || state.currentUser.age;
+  state.currentUser.gender = row.gender || state.currentUser.gender;
+  state.currentUser.country = row.country || state.currentUser.country;
+  state.currentUser.city = row.city || state.currentUser.city;
+  state.currentUser.role = row.role || state.currentUser.role;
+  state.currentUser.field = row.field || state.currentUser.field;
+  state.currentUser.organization = row.organization || state.currentUser.organization;
+  state.currentUser.languages = Array.isArray(row.languages) ? row.languages.join(", ") : state.currentUser.languages;
+  state.currentUser.purpose = Array.isArray(row.purposes) ? row.purposes.join(", ") : state.currentUser.purpose;
+  state.currentUser.profilePhoto = row.profile_photo_url || state.currentUser.profilePhoto;
+  state.currentUser.verification = {
+    identity: row.identity_status || state.currentUser.verification.identity,
+    role: row.role_status || state.currentUser.verification.role,
+    gender: row.gender_status || state.currentUser.verification.gender,
+    uniqueness: row.uniqueness_status || state.currentUser.verification.uniqueness,
+  };
 }
 
 function countries() {
@@ -995,7 +1061,6 @@ function renderProofStep(user) {
 
       <div class="verify-actions">
         <button class="button primary large" data-action="submit-proof" title="Submit proof">${icon("plus")}Submit proof</button>
-        <button class="button success large" data-action="verify-role" title="Approve proof">${icon("shield")}Approve proof</button>
         <button class="button large" data-action="set-verify-step" data-step="safety" title="Continue to safety">Continue</button>
       </div>
 
@@ -1041,7 +1106,7 @@ function renderSafetyStep(user) {
 
 function verificationAction(key, title, description) {
   const status = state.currentUser.verification[key];
-  const label = status === "verified" ? "Recheck" : "Verify";
+  const label = status === "verified" ? "Verified" : status === "pending" ? "Queued" : "Start";
   return `
     <div class="verify-check ${status}">
       <span class="check-dot">${status === "verified" ? icon("check", true) : icon("shield", true)}</span>
@@ -1049,7 +1114,7 @@ function verificationAction(key, title, description) {
         <strong>${escapeHtml(title)}</strong>
         <p class="small text-muted">${escapeHtml(description)}</p>
       </div>
-      <button class="button" data-action="verify-check" data-check="${key}" title="${escapeHtml(label)} ${escapeHtml(title)}">${label}</button>
+      <button class="button" data-action="verify-check" data-check="${key}" title="${escapeHtml(label)} ${escapeHtml(title)}" ${status === "verified" ? "disabled" : ""}>${label}</button>
     </div>
   `;
 }
@@ -1568,12 +1633,12 @@ function renderAdmin() {
       <article class="safety-hero">
         <div>
           <p class="eyebrow">Safety center</p>
-          <h2>Keep the app respectful in real time</h2>
-          <p>Reports, proof checks, and live video controls are handled as simple review cards instead of messy admin tables.</p>
+          <h2>Review what you submitted</h2>
+          <p>Reports and proof submissions go to the live Supabase queues. Only a trusted operator should approve proof or suspend accounts.</p>
         </div>
         <div class="safety-score">
           <strong>${state.reports.length}</strong>
-          <span>open reports</span>
+          <span>your reports</span>
         </div>
       </article>
 
@@ -1601,9 +1666,8 @@ function renderAdmin() {
                             </div>
                           </div>
                           <div class="review-actions">
-                            <span class="badge ${report.priority === "High" ? "rose" : "amber"}">${escapeHtml(report.priority)}</span>
-                            <button class="button success" data-action="resolve-report" data-id="${report.id}" title="Resolve report">${icon("check")}Resolve</button>
-                            <button class="button danger" data-action="suspend-user" data-id="${report.profileId}" title="Suspend user">${icon("ban")}Suspend</button>
+                            <span class="badge ${report.priority === "High" ? "rose" : "amber"}">${escapeHtml(report.status || "open")}</span>
+                            <button class="button" disabled title="Admin review required">${icon("shield")}Under review</button>
                           </div>
                         </div>
                       `;
@@ -1633,7 +1697,7 @@ function renderAdmin() {
                           </div>
                           <div class="review-actions">
                             <span class="badge amber">${escapeHtml(item.status)}</span>
-                            <button class="button success" data-action="verify-role" title="Approve proof">${icon("check")}Approve</button>
+                            <button class="button" disabled title="Admin review required">${icon("shield")}Admin only</button>
                           </div>
                         </div>
                       `,
@@ -1646,7 +1710,7 @@ function renderAdmin() {
 
         <article class="safety-feed-card">
           <p class="eyebrow">Live user controls</p>
-          <h2 class="section-title">Respect scores</h2>
+          <h2 class="section-title">Verified people</h2>
           <div class="safety-user-list">
             ${
               state.profiles.length
@@ -1664,7 +1728,7 @@ function renderAdmin() {
                     <div class="review-actions">
                       <span class="badge green">Respect ${profile.respectScore}</span>
                       <span class="badge ${profile.status === "active" ? "green" : "rose"}">${escapeHtml(profile.status)}</span>
-                      <button class="button ${profile.status === "active" ? "danger" : "success"}" data-action="${profile.status === "active" ? "suspend-user" : "restore-user"}" data-id="${profile.id}" title="Change status">${profile.status === "active" ? icon("ban") + "Suspend" : icon("check") + "Restore"}</button>
+                      <button class="button" disabled title="Admin action is not exposed here">${icon("lock")}Admin only</button>
                     </div>
                   </div>
                 `,
@@ -1718,7 +1782,7 @@ function renderPlanCard(name, label, detail, plan) {
 
 function renderAuth() {
   const result = state.auth.result;
-  const signedIn = Boolean(state.auth.session);
+  const signedIn = isSignedIn();
   return `
     <section class="auth-screen">
       <article class="auth-hero">
@@ -1838,9 +1902,9 @@ function renderPrivacy() {
     <section class="privacy-screen">
       <article class="privacy-hero">
         <div>
-          <p class="eyebrow">Local vault</p>
-          <h2>Your data stays on this browser</h2>
-          <p>This app keeps your local profile draft, chats, reminders, media, and settings in this browser.</p>
+          <p class="eyebrow">Private vault</p>
+          <h2>You control local and synced data</h2>
+          <p>Unsigned drafts stay in this browser. Signed-in profile, proof, chat, reports, and reminders sync through Supabase RLS.</p>
         </div>
         <span class="check-dot">${icon("lock")}</span>
       </article>
@@ -2035,22 +2099,46 @@ function buildSuggestions(relation, goal, tone, context) {
   return selected.map((line) => `${line} Tone: ${tone}.`);
 }
 
-function submitProof() {
+async function submitProof() {
   const type = getValue("proof-type");
   const proofFile = document.querySelector("#proof-file")?.files?.[0];
   const note = getValue("proof-note");
+  if (!requireSignedIn("submitting verification proof")) return;
   const detail = proofFile ? `${proofFile.name}${note ? ` - ${note}` : ""}` : note || "Reference submitted";
+  let upload = null;
+  try {
+    if (proofFile) upload = await uploadFileToStorage("bondbridge-proofs", proofFile);
+  } catch (error) {
+    toast(error.message || "Proof upload failed.");
+    return;
+  }
+  const result = await apiJson("/api/proof", {
+    method: "POST",
+    auth: true,
+    body: JSON.stringify({
+      document_type: type,
+      storage_path: upload?.path || "",
+      file_name: proofFile?.name || "",
+      note,
+    }),
+  });
+  if (!result.ok) {
+    toast(result.payload?.message || "Proof could not be queued.");
+    return;
+  }
+  const row = result.payload?.document;
   state.currentUser.proofQueue.unshift({
-    id: `proof-${Date.now()}`,
+    id: row?.id || `proof-${Date.now()}`,
     type,
     detail,
-    status: "Needs review",
+    status: row?.status || "pending",
   });
+  state.proofDocuments = [row, ...state.proofDocuments].filter(Boolean);
   state.currentUser.verification.role = "pending";
-  toast("Proof submitted for review. Raw files stay private.");
+  toast("Proof queued for private review.");
 }
 
-function saveProfile() {
+async function saveProfile() {
   state.currentUser.name = getValue("profile-name") || state.currentUser.name;
   state.currentUser.age = Number(getValue("profile-age")) || state.currentUser.age;
   state.currentUser.gender = getValue("profile-gender") || state.currentUser.gender;
@@ -2060,31 +2148,95 @@ function saveProfile() {
   state.currentUser.organization = getValue("profile-org") || state.currentUser.organization;
   state.currentUser.languages = getValue("profile-languages") || state.currentUser.languages;
   state.currentUser.purpose = getValue("profile-purpose") || state.currentUser.purpose;
+  if (isSignedIn()) {
+    try {
+      if (state.currentUser.profilePhoto && state.currentUser.profilePhoto.startsWith("data:image/")) {
+        const response = await fetch(state.currentUser.profilePhoto);
+        const blob = await response.blob();
+        const file = new File([blob], "profile-photo.png", { type: blob.type || "image/png" });
+        const uploaded = await uploadFileToStorage("bondbridge-avatars", file);
+        state.currentUser.profilePhoto = uploaded.public_url || state.currentUser.profilePhoto;
+      }
+    } catch (error) {
+      toast(error.message || "Profile photo upload failed.");
+      return;
+    }
+    const result = await apiJson("/api/profiles/me", {
+      method: "POST",
+      auth: true,
+      body: JSON.stringify({
+        full_name: state.currentUser.name,
+        gender: state.currentUser.gender,
+        age: state.currentUser.age,
+        country: state.currentUser.country,
+        city: state.currentUser.city,
+        role: state.currentUser.role,
+        field: state.currentUser.field,
+        organization: state.currentUser.organization,
+        languages: state.currentUser.languages.split(",").map((item) => item.trim()).filter(Boolean),
+        purposes: state.currentUser.purpose.split(",").map((item) => item.trim()).filter(Boolean),
+        bio: state.currentUser.purpose,
+        profile_photo_url: state.currentUser.profilePhoto.startsWith("http") ? state.currentUser.profilePhoto : "",
+      }),
+    });
+    if (!result.ok) {
+      toast(result.payload?.message || "Profile could not sync.");
+      return;
+    }
+    applyProfileRowToCurrentUser(result.payload?.profile);
+    toast("Profile synced to Supabase.");
+  } else {
+    toast("Profile saved locally. Log in to sync it.");
+  }
   saveState();
-  toast("Profile saved.");
 }
 
-function connect(profileId) {
+async function connect(profileId) {
   const profile = profileById(profileId);
   if (!profile) return;
   if (requestFor(profileId) || state.connections.includes(profileId)) {
     toast("This person is already in your request or connection list.");
     return;
   }
+  if (!requireSignedIn("sending a real connection request")) return;
+  const result = await apiJson("/api/connections/request", {
+    method: "POST",
+    auth: true,
+    body: JSON.stringify({
+      recipient_id: profileId,
+      note: `I would like a respectful ${profile.purposes[0]?.toLowerCase() || "friendship"} connection.`,
+    }),
+  });
+  if (!result.ok) {
+    toast(result.payload?.message || "Connection request could not be sent.");
+    return;
+  }
   state.requests.unshift({
-    id: `r-${Date.now()}`,
+    id: result.payload?.connection?.id || `r-${Date.now()}`,
     profileId,
     direction: "outgoing",
     status: "pending",
-    note: `You requested a ${profile.purposes[0].toLowerCase()} connection with ${profile.name}.`,
+    note: `You requested a ${(profile.purposes[0] || "friendship").toLowerCase()} connection with ${profile.name}.`,
     createdAt: today(),
   });
+  await refreshConnections(false);
   toast(`Connection request sent to ${profile.name}.`);
 }
 
-function acceptRequest(requestId) {
+async function acceptRequest(requestId) {
   const request = state.requests.find((item) => item.id === requestId);
   if (!request) return;
+  if (isSignedIn()) {
+    const result = await apiJson("/api/connections/respond", {
+      method: "POST",
+      auth: true,
+      body: JSON.stringify({ connection_id: requestId, status: "accepted" }),
+    });
+    if (!result.ok) {
+      toast(result.payload?.message || "Request could not be accepted.");
+      return;
+    }
+  }
   request.status = "accepted";
   request.direction = "accepted";
   if (!state.connections.includes(request.profileId)) {
@@ -2092,21 +2244,34 @@ function acceptRequest(requestId) {
   }
   if (!state.chats[request.profileId]) state.chats[request.profileId] = [];
   state.selectedChat = request.profileId;
+  await refreshConnections(false);
   toast("Connection accepted. Private chat is now open.");
 }
 
-function reportProfile(profileId) {
+async function reportProfile(profileId) {
   const profile = profileById(profileId);
   if (!profile) return;
+  if (!requireSignedIn("sending a real safety report")) return;
+  const result = await apiJson("/api/reports", {
+    method: "POST",
+    auth: true,
+    body: JSON.stringify({
+      reported_user_id: profileId,
+      reason: `${profile.name} was reported for admin review.`,
+    }),
+  });
+  if (!result.ok) {
+    toast(result.payload?.message || "Report could not be sent.");
+    return;
+  }
   state.reports.unshift({
-    id: `rep-${Date.now()}`,
+    id: result.payload?.report?.id || `rep-${Date.now()}`,
     profileId,
     type: "User report",
     message: `${profile.name} was reported for admin review.`,
     status: "Open",
     priority: "High",
   });
-  profile.respectScore = Math.max(0, profile.respectScore - 6);
   toast("Report sent to Safety Admin.");
 }
 
@@ -2137,11 +2302,32 @@ async function buildChatAttachment() {
   };
 }
 
+async function uploadFileToStorage(bucket, file) {
+  if (!file || !isSignedIn()) return null;
+  const maxBytes = bucket === "bondbridge-proofs" ? 10 * 1024 * 1024 : 5 * 1024 * 1024;
+  if (file.size > maxBytes) {
+    throw new Error(`File must be ${Math.round(maxBytes / 1024 / 1024)}MB or smaller.`);
+  }
+  const dataUrl = await readFileAsDataUrl(file);
+  const result = await apiJson("/api/storage/upload", {
+    method: "POST",
+    auth: true,
+    body: JSON.stringify({
+      bucket,
+      fileName: file.name,
+      contentType: file.type || "application/octet-stream",
+      dataUrl,
+    }),
+  });
+  if (!result.ok) throw new Error(result.payload?.message || "File upload failed.");
+  return result.payload;
+}
+
 async function sendMessage() {
   const input = document.querySelector("#chat-input");
-  const attachment = await buildChatAttachment();
   const text = input ? input.value.trim() : "";
-  if (!text && !attachment) return;
+  const file = document.querySelector("#chat-attachment")?.files?.[0];
+  if (!text && !file) return;
   if (hasAbuse(text)) {
     state.moderationLog.unshift("Blocked outgoing message for disrespectful language.");
     toast("Message blocked. Please rewrite it respectfully.");
@@ -2149,26 +2335,49 @@ async function sendMessage() {
   }
   const profileId = state.selectedChat;
   if (!profileId) return;
+  if (!requireSignedIn("sending a real message")) return;
+
+  let attachment = null;
+  let attachmentPath = "";
+  try {
+    if (file) {
+      attachment = await buildChatAttachment();
+      const uploaded = await uploadFileToStorage("bondbridge-chat", file);
+      attachmentPath = uploaded?.path || "";
+    }
+  } catch (error) {
+    toast(error.message || "Attachment upload failed.");
+    return;
+  }
+
+  const result = await apiJson("/api/messages", {
+    method: "POST",
+    auth: true,
+    body: JSON.stringify({
+      recipient_id: profileId,
+      body: text,
+      attachment_path: attachmentPath,
+    }),
+  });
+  if (!result.ok) {
+    toast(result.payload?.message || "Message could not be sent.");
+    return;
+  }
+
   if (!state.chats[profileId]) state.chats[profileId] = [];
   state.chats[profileId].push({ from: "me", text, attachment, time: nowTime() });
-  const profile = profileById(profileId);
-  state.chats[profileId].push({
-    from: "them",
-    text: attachment
-      ? `Thanks for sharing that respectfully. ${profile ? "I will look at it and reply with care." : "I will reply with care."}`
-      : `Thanks for keeping the conversation respectful. ${profile ? "I would like to hear more about your goals." : "Tell me more."}`,
-    time: nowTime(),
-  });
-  toast("Message sent.");
+  if (input) input.value = "";
+  toast("Message sent to Supabase.");
+  await refreshMessages(profileId, false);
 }
 
-function addFamily() {
+async function addFamily() {
   const name = getValue("family-name");
   if (!name) {
     toast("Add a name first.");
     return;
   }
-  state.family.unshift({
+  const reminder = {
     id: `f-${Date.now()}`,
     name,
     relation: getValue("family-relation") || "Friend",
@@ -2176,8 +2385,68 @@ function addFamily() {
     cadence: Math.max(1, Number(getValue("family-cadence")) || 14),
     lastContactDays: 0,
     notes: getValue("family-notes") || "Check in with kindness.",
-  });
-  toast("Relationship reminder added.");
+  };
+
+  if (isSignedIn()) {
+    const result = await apiJson("/api/family-reminders", {
+      method: "POST",
+      auth: true,
+      body: JSON.stringify({
+        name: reminder.name,
+        relationship: reminder.relation,
+        cadence_days: reminder.cadence,
+        notes: reminder.notes,
+      }),
+    });
+    if (!result.ok) {
+      toast(result.payload?.message || "Reminder could not sync.");
+      return;
+    }
+    await refreshFamilyReminders(false);
+    toast("Relationship reminder synced.");
+    return;
+  }
+
+  state.family.unshift(reminder);
+  toast("Reminder saved locally. Log in to sync it.");
+}
+
+async function markFamilyContacted(id) {
+  const person = state.family.find((item) => item.id === id);
+  if (!person) return;
+  if (isSignedIn()) {
+    const result = await apiJson("/api/family-reminders/contacted", {
+      method: "POST",
+      auth: true,
+      body: JSON.stringify({ reminder_id: id }),
+    });
+    if (!result.ok) {
+      toast(result.payload?.message || "Reminder could not be updated.");
+      return;
+    }
+    await refreshFamilyReminders(false);
+    toast(`${person.name} marked as contacted.`);
+    return;
+  }
+  person.lastContactDays = 0;
+  toast(`${person.name} marked locally. Log in to sync it.`);
+}
+
+async function declineRequest(requestId) {
+  if (isSignedIn()) {
+    const result = await apiJson("/api/connections/respond", {
+      method: "POST",
+      auth: true,
+      body: JSON.stringify({ connection_id: requestId, status: "declined" }),
+    });
+    if (!result.ok) {
+      toast(result.payload?.message || "Request could not be declined.");
+      return;
+    }
+  }
+  state.requests = state.requests.filter((request) => request.id !== requestId);
+  await refreshConnections(false);
+  toast("Request declined.");
 }
 
 function familyMessage(id) {
@@ -2384,6 +2653,127 @@ async function refreshLiveProfiles(showToast = true) {
   render();
 }
 
+function normalizeFamilyRows(rows = []) {
+  return rows.map((row) => {
+    const last = row.last_contact_at ? Math.max(0, Math.floor((Date.now() - new Date(row.last_contact_at).getTime()) / 86400000)) : 0;
+    return {
+      id: row.id,
+      name: row.name || "Relationship",
+      relation: row.relationship || "Friend",
+      channel: "Message",
+      cadence: row.cadence_days || 7,
+      lastContactDays: last,
+      notes: row.notes || "Check in with kindness.",
+    };
+  });
+}
+
+function normalizeMessageRows(rows = [], profileId) {
+  return rows.map((row) => ({
+    id: row.id,
+    from: row.sender_id === state.currentUser.id ? "me" : "them",
+    text: row.body || "",
+    attachment: row.attachment_url
+      ? {
+          kind: row.attachment_url.match(/\.(png|jpe?g|webp|gif)$/i) ? "image" : "file",
+          name: row.attachment_url.split("/").pop() || "Attachment",
+          dataUrl: row.attachment_public_url || "",
+          path: row.attachment_url,
+        }
+      : null,
+    time: row.created_at ? new Date(row.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : nowTime(),
+    profileId,
+  }));
+}
+
+async function refreshMe(showToast = false) {
+  if (!isSignedIn()) return false;
+  const result = await apiJson("/api/me", { auth: true });
+  if (!result.ok) {
+    if (showToast) toast(result.payload?.message || "Account sync failed.");
+    return false;
+  }
+  applyProfileRowToCurrentUser(result.payload?.profile);
+  saveState();
+  if (showToast) toast("Account synced.");
+  return true;
+}
+
+async function refreshConnections(showToast = false) {
+  if (!isSignedIn()) return false;
+  const result = await apiJson("/api/connections", { auth: true });
+  if (!result.ok) {
+    if (showToast) toast(result.payload?.message || "Connections could not sync.");
+    return false;
+  }
+  syncConnectionRows(result.payload?.connections || []);
+  saveState();
+  if (showToast) toast("Connections synced.");
+  return true;
+}
+
+async function refreshMessages(profileId = state.selectedChat, showToast = false) {
+  if (!isSignedIn() || !profileId) return false;
+  const result = await apiJson(`/api/messages?recipient_id=${encodeURIComponent(profileId)}`, { auth: true });
+  if (!result.ok) {
+    if (showToast) toast(result.payload?.message || "Messages could not sync.");
+    return false;
+  }
+  state.chats[profileId] = normalizeMessageRows(result.payload?.messages || [], profileId);
+  saveState();
+  if (showToast) toast("Messages synced.");
+  render();
+  return true;
+}
+
+async function refreshFamilyReminders(showToast = false) {
+  if (!isSignedIn()) return false;
+  const result = await apiJson("/api/family-reminders", { auth: true });
+  if (!result.ok) {
+    if (showToast) toast(result.payload?.message || "Family reminders could not sync.");
+    return false;
+  }
+  state.family = normalizeFamilyRows(result.payload?.reminders || []);
+  saveState();
+  if (showToast) toast("Family reminders synced.");
+  render();
+  return true;
+}
+
+async function refreshReports(showToast = false) {
+  if (!isSignedIn()) return false;
+  const result = await apiJson("/api/reports", { auth: true });
+  if (!result.ok) {
+    if (showToast) toast(result.payload?.message || "Reports could not sync.");
+    return false;
+  }
+  state.reports = (result.payload?.reports || []).map((row) => ({
+    id: row.id,
+    profileId: row.reported_user_id || "",
+    type: "User report",
+    message: row.reason || "Report submitted for admin review.",
+    status: row.status || "open",
+    priority: row.status === "open" ? "High" : "Medium",
+  }));
+  saveState();
+  if (showToast) toast("Reports synced.");
+  render();
+  return true;
+}
+
+async function refreshSignedInData(showToast = false) {
+  if (!isSignedIn()) return;
+  await refreshMe(false);
+  await refreshLiveProfiles(false);
+  await refreshConnections(false);
+  await refreshFamilyReminders(false);
+  await refreshReports(false);
+  if (state.selectedChat) await refreshMessages(state.selectedChat, false);
+  saveState();
+  if (showToast) toast("Live data synced.");
+  render();
+}
+
 async function signupAccount() {
   const password = getValue("auth-password");
   saveAuthDraft();
@@ -2406,6 +2796,7 @@ async function signupAccount() {
   });
   if (result.ok) {
     authAccessToken = result.payload?.session?.access_token || authAccessToken;
+    state.currentUser.id = result.payload?.user?.id || state.currentUser.id;
     state.auth.session = {
       email: state.auth.email,
       provider: "supabase",
@@ -2414,6 +2805,7 @@ async function signupAccount() {
     };
     setAuthResult("Signup request completed", "Supabase accepted the account request. Continue with profile proof.", result.payload);
     toast("Signup completed.");
+    await refreshSignedInData(false);
   } else {
     setAuthResult("Signup unavailable", result.payload?.message || "Signup could not complete.", result.payload);
     toast("Signup route needs Supabase config.");
@@ -2434,6 +2826,7 @@ async function loginAccount() {
   });
   if (result.ok) {
     authAccessToken = result.payload?.session?.access_token || "";
+    state.currentUser.id = result.payload?.user?.id || state.currentUser.id;
     state.auth.session = {
       email: state.auth.email,
       provider: "supabase",
@@ -2442,6 +2835,7 @@ async function loginAccount() {
     };
     setAuthResult("Login completed", "Supabase returned an auth response for this account.", result.payload);
     toast("Logged in.");
+    await refreshSignedInData(false);
   } else {
     setAuthResult("Login unavailable", result.payload?.message || "Login could not complete.", result.payload);
     toast("Login route needs Supabase config.");
@@ -2510,29 +2904,31 @@ document.addEventListener("click", async (event) => {
   if (!action) return;
 
   if (action === "verify-check") {
-    state.currentUser.verification[button.dataset.check] = "verified";
-    toast("Verification check completed.");
-  }
-
-  if (action === "verify-role") {
-    state.currentUser.verification.role = "verified";
-    state.currentUser.proofQueue = state.currentUser.proofQueue.map((item) => ({ ...item, status: "Approved" }));
-    toast("Role proof approved.");
+    if (!requireSignedIn("starting verification")) return;
+    state.currentUser.verification[button.dataset.check] = "pending";
+    await startIdentityCheck();
+    saveState();
+    render();
+    return;
   }
 
   if (action === "set-verify-step") {
     state.verifyStep = button.dataset.step || "profile";
   }
 
-  if (action === "submit-proof") submitProof();
-  if (action === "save-profile") saveProfile();
+  if (action === "submit-proof") {
+    await submitProof();
+  }
+  if (action === "save-profile") {
+    await saveProfile();
+  }
 
   if (action === "save-profile-next") {
-    saveProfile();
+    await saveProfile();
     state.verifyStep = "proof";
   }
 
-  if (action === "connect") connect(id);
+  if (action === "connect") await connect(id);
 
   if (action === "toggle-theme") {
     state.theme = state.theme === "dark" ? "light" : "dark";
@@ -2601,17 +2997,17 @@ document.addEventListener("click", async (event) => {
     toast("Profile skipped.");
   }
 
-  if (action === "report-profile") reportProfile(id);
-  if (action === "accept-request") acceptRequest(id);
+  if (action === "report-profile") await reportProfile(id);
+  if (action === "accept-request") await acceptRequest(id);
 
   if (action === "decline-request") {
-    state.requests = state.requests.filter((request) => request.id !== id);
-    toast("Request declined.");
+    await declineRequest(id);
   }
 
   if (action === "open-chat" || action === "select-chat") {
     state.selectedChat = id;
     state.view = "chat";
+    await refreshMessages(id, false);
   }
 
   if (action === "rewrite-chat") {
@@ -2644,14 +3040,10 @@ document.addEventListener("click", async (event) => {
     }
   }
 
-  if (action === "add-family") addFamily();
+  if (action === "add-family") await addFamily();
 
   if (action === "mark-contacted") {
-    const person = state.family.find((item) => item.id === id);
-    if (person) {
-      person.lastContactDays = 0;
-      toast(`${person.name} marked as contacted.`);
-    }
+    await markFamilyContacted(id);
   }
 
   if (action === "family-message") familyMessage(id);

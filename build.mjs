@@ -268,6 +268,32 @@ function supabaseHeaders(config, token = config.publishable) {
   };
 }
 
+function supabaseUploadHeaders(config, token, contentType) {
+  return {
+    apikey: config.publishable,
+    authorization: "Bearer " + token,
+    "content-type": contentType || "application/octet-stream",
+  };
+}
+
+function textValue(value, fallback = "") {
+  return String(value || fallback).trim();
+}
+
+function textArray(value) {
+  if (Array.isArray(value)) return value.map((item) => textValue(item)).filter(Boolean);
+  return String(value || "").split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function statusMessage(payload, fallback) {
+  if (payload && typeof payload === "object") {
+    if (payload.message) return payload.message;
+    if (payload.error_description) return payload.error_description;
+    if (payload.hint) return payload.hint;
+  }
+  return fallback;
+}
+
 function publicProfileSelect() {
   return [
     "id",
@@ -328,6 +354,77 @@ function bearerToken(request) {
   return match ? match[1].trim() : "";
 }
 
+async function authenticate(request, env) {
+  const config = supabaseConfig(env);
+  if (!config) {
+    return {
+      ok: false,
+      response: notConfigured("supabase-auth", ["SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY"]),
+    };
+  }
+  const accessToken = bearerToken(request);
+  if (!accessToken) {
+    return {
+      ok: false,
+      response: json({ ok: false, status: "login_required", message: "Log in before using this live feature." }, 401),
+    };
+  }
+  const response = await fetch(config.url + "/auth/v1/user", {
+    headers: supabaseHeaders(config, accessToken),
+  });
+  const user = await response.json().catch(() => ({}));
+  if (!response.ok || !user.id) {
+    return {
+      ok: false,
+      response: json({ ok: false, status: "invalid_session", message: "Your session expired. Log in again.", error: redactAuth(user) }, 401),
+    };
+  }
+  return { ok: true, config, accessToken, user };
+}
+
+async function supabaseFetch(config, accessToken, table, query = "", options = {}) {
+  const path = query ? table + "?" + query : table;
+  const response = await fetch(config.url + "/rest/v1/" + path, {
+    ...options,
+    headers: {
+      ...supabaseHeaders(config, accessToken),
+      ...(options.prefer ? { prefer: options.prefer } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  const payload = await response.json().catch(() => null);
+  return { response, payload };
+}
+
+function dataUrlToBytes(dataUrl) {
+  const match = String(dataUrl || "").match(/^data:([^;,]+)?(;base64)?,(.*)$/);
+  if (!match || !match[2]) return null;
+  const binary = atob(match[3]);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
+function safeStorageName(name) {
+  const base = textValue(name, "upload.bin").replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "");
+  return base || "upload.bin";
+}
+
+async function signedStorageUrl(config, accessToken, bucket, storagePath) {
+  const path = textValue(storagePath);
+  if (!path) return "";
+  const response = await fetch(config.url + "/storage/v1/object/sign/" + bucket + "/" + path, {
+    method: "POST",
+    headers: supabaseHeaders(config, accessToken),
+    body: JSON.stringify({ expiresIn: 3600 }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) return "";
+  const signed = payload.signedURL || payload.signedUrl || "";
+  if (!signed) return "";
+  return signed.startsWith("http") ? signed : config.url + "/storage/v1" + signed;
+}
+
 function roomCode() {
   return Math.random().toString(36).slice(2, 6).toUpperCase() + "-" + Math.random().toString(36).slice(2, 6).toUpperCase();
 }
@@ -341,7 +438,8 @@ async function listProfiles(request, env) {
     is_suspended: "eq.false",
     identity_status: "eq.verified",
     gender_status: "eq.verified",
-    role_status: "in.(pending,verified)",
+    role_status: "eq.verified",
+    uniqueness_status: "eq.verified",
     order: "respect_score.desc,created_at.desc",
     limit: "50",
   });
@@ -422,6 +520,403 @@ async function createIdentitySession(request, env) {
     next_step: "Upload proof in the Verify page. Admin review happens from the Supabase verification_documents queue.",
     message: "Free verification is connected through Supabase and manual review, without a paid ID API.",
   });
+}
+
+async function currentAccount(request, env) {
+  const auth = await authenticate(request, env);
+  if (!auth.ok) return auth.response;
+  const query = new URLSearchParams({ select: publicProfileSelect(), id: "eq." + auth.user.id, limit: "1" });
+  const { response, payload } = await supabaseFetch(auth.config, auth.accessToken, "profiles", query);
+  const profile = Array.isArray(payload) ? payload[0] : null;
+  return json({
+    ok: response.ok,
+    provider: "supabase",
+    user: { id: auth.user.id, email: auth.user.email || "" },
+    profile,
+    message: response.ok ? "Signed-in account loaded." : statusMessage(payload, "Profile could not be loaded."),
+    error: response.ok ? null : payload,
+  }, response.ok ? 200 : response.status);
+}
+
+async function saveMyProfile(request, env) {
+  const auth = await authenticate(request, env);
+  if (!auth.ok) return auth.response;
+  const body = await readJson(request);
+  const payload = {
+    id: auth.user.id,
+    full_name: textValue(body.full_name || body.name, auth.user.email || "BondBridge user"),
+    gender: textValue(body.gender),
+    age: Number(body.age),
+    country: textValue(body.country),
+    city: textValue(body.city),
+    role: textValue(body.role, "Student"),
+    field: textValue(body.field, "General"),
+    organization: textValue(body.organization),
+    languages: textArray(body.languages),
+    purposes: textArray(body.purposes),
+    bio: textValue(body.bio),
+    profile_photo_url: textValue(body.profile_photo_url),
+    updated_at: new Date().toISOString(),
+  };
+  if (!payload.gender || !payload.age || !payload.country || !payload.field || !payload.organization) {
+    return json({ ok: false, message: "Name, age, gender, country, field, and university/company are required." }, 400);
+  }
+  const { response, payload: data } = await supabaseFetch(auth.config, auth.accessToken, "profiles", "", {
+    method: "POST",
+    prefer: "resolution=merge-duplicates,return=representation",
+    body: JSON.stringify(payload),
+  });
+  const profile = Array.isArray(data) ? data[0] : data;
+  return json({
+    ok: response.ok,
+    provider: "supabase",
+    profile: response.ok ? profile : null,
+    error: response.ok ? null : data,
+    message: response.ok ? "Profile saved. It stays pending until proof is reviewed." : statusMessage(data, "Profile could not be saved."),
+  }, response.ok ? 200 : response.status);
+}
+
+async function uploadStorageFile(request, env) {
+  const auth = await authenticate(request, env);
+  if (!auth.ok) return auth.response;
+  const body = await readJson(request);
+  const bucket = textValue(body.bucket);
+  const allowedBuckets = ["bondbridge-avatars", "bondbridge-proofs", "bondbridge-chat"];
+  if (!allowedBuckets.includes(bucket)) return json({ ok: false, message: "Unsupported storage bucket." }, 400);
+  const bytes = dataUrlToBytes(body.dataUrl);
+  if (!bytes) return json({ ok: false, message: "Upload must be sent as a base64 data URL." }, 400);
+  const maxBytes = bucket === "bondbridge-proofs" ? 10 * 1024 * 1024 : 5 * 1024 * 1024;
+  if (bytes.byteLength > maxBytes) return json({ ok: false, message: "File is too large for the free beta upload limit." }, 413);
+  const fileName = Date.now() + "-" + safeStorageName(body.fileName);
+  const path = auth.user.id + "/" + fileName;
+  const contentType = textValue(body.contentType, "application/octet-stream");
+  const response = await fetch(auth.config.url + "/storage/v1/object/" + bucket + "/" + path, {
+    method: "POST",
+    headers: {
+      ...supabaseUploadHeaders(auth.config, auth.accessToken, contentType),
+      "x-upsert": "false",
+    },
+    body: bytes,
+  });
+  const payload = await response.json().catch(() => ({}));
+  const publicUrl = bucket === "bondbridge-avatars"
+    ? auth.config.url + "/storage/v1/object/public/" + bucket + "/" + path
+    : "";
+  return json({
+    ok: response.ok,
+    provider: "supabase-storage",
+    bucket,
+    path,
+    public_url: response.ok ? publicUrl : "",
+    error: response.ok ? null : payload,
+    message: response.ok ? "File uploaded to Supabase Storage." : statusMessage(payload, "Storage upload failed."),
+  }, response.ok ? 200 : response.status);
+}
+
+async function submitProofDocument(request, env) {
+  const auth = await authenticate(request, env);
+  if (!auth.ok) return auth.response;
+  const body = await readJson(request);
+  const storagePath = textValue(body.storage_path) || "manual-note/" + auth.user.id + "/" + Date.now() + "-" + safeStorageName(body.file_name || body.document_type || "proof.txt");
+  const row = {
+    user_id: auth.user.id,
+    document_type: textValue(body.document_type, "Identity proof"),
+    storage_path: storagePath,
+    status: "pending",
+    reviewer_note: textValue(body.note),
+  };
+  const { response, payload } = await supabaseFetch(auth.config, auth.accessToken, "verification_documents", "", {
+    method: "POST",
+    prefer: "return=representation",
+    body: JSON.stringify(row),
+  });
+  const document = Array.isArray(payload) ? payload[0] : payload;
+  return json({
+    ok: response.ok,
+    provider: "supabase",
+    document: response.ok ? document : null,
+    error: response.ok ? null : payload,
+    message: response.ok ? "Proof queued for private manual review." : statusMessage(payload, "Proof could not be queued."),
+  }, response.ok ? 200 : response.status);
+}
+
+async function listConnections(request, env) {
+  const auth = await authenticate(request, env);
+  if (!auth.ok) return auth.response;
+  const query = new URLSearchParams({
+    select: "*",
+    or: "(requester_id.eq." + auth.user.id + ",recipient_id.eq." + auth.user.id + ")",
+    order: "updated_at.desc,created_at.desc",
+  });
+  const { response, payload } = await supabaseFetch(auth.config, auth.accessToken, "connections", query);
+  return json({
+    ok: response.ok,
+    provider: "supabase",
+    connections: response.ok && Array.isArray(payload) ? payload : [],
+    error: response.ok ? null : payload,
+    message: response.ok ? "Connections loaded." : statusMessage(payload, "Connections could not be loaded."),
+  }, response.ok ? 200 : response.status);
+}
+
+async function requestConnection(request, env) {
+  const auth = await authenticate(request, env);
+  if (!auth.ok) return auth.response;
+  const body = await readJson(request);
+  const recipientId = textValue(body.recipient_id);
+  if (!recipientId || recipientId === auth.user.id) return json({ ok: false, message: "Choose another verified user first." }, 400);
+  const profileQuery = new URLSearchParams({ select: "id", id: "eq." + recipientId, limit: "1" });
+  const { response: profileResponse, payload: profilePayload } = await supabaseFetch(auth.config, auth.accessToken, "profiles", profileQuery);
+  if (!profileResponse.ok || !Array.isArray(profilePayload) || !profilePayload.length) {
+    return json({ ok: false, message: "The selected person is not available for verified discovery." }, 404);
+  }
+  const row = {
+    requester_id: auth.user.id,
+    recipient_id: recipientId,
+    note: textValue(body.note, "Respectful connection request."),
+    status: "pending",
+  };
+  const { response, payload } = await supabaseFetch(auth.config, auth.accessToken, "connections", "", {
+    method: "POST",
+    prefer: "resolution=ignore-duplicates,return=representation",
+    body: JSON.stringify(row),
+  });
+  const connection = Array.isArray(payload) ? payload[0] : payload;
+  return json({
+    ok: response.ok,
+    provider: "supabase",
+    connection: response.ok ? connection : null,
+    error: response.ok ? null : payload,
+    message: response.ok ? "Connection request sent." : statusMessage(payload, "Connection request could not be sent."),
+  }, response.ok ? 200 : response.status);
+}
+
+async function respondConnection(request, env) {
+  const auth = await authenticate(request, env);
+  if (!auth.ok) return auth.response;
+  const body = await readJson(request);
+  const connectionId = textValue(body.connection_id);
+  const status = textValue(body.status);
+  if (!connectionId || !["accepted", "declined", "blocked"].includes(status)) {
+    return json({ ok: false, message: "Connection id and valid status are required." }, 400);
+  }
+  const query = new URLSearchParams({ id: "eq." + connectionId, select: "*" });
+  const { response, payload } = await supabaseFetch(auth.config, auth.accessToken, "connections", query, {
+    method: "PATCH",
+    prefer: "return=representation",
+    body: JSON.stringify({ status, updated_at: new Date().toISOString() }),
+  });
+  const connection = Array.isArray(payload) ? payload[0] : payload;
+  return json({
+    ok: response.ok,
+    provider: "supabase",
+    connection: response.ok ? connection : null,
+    error: response.ok ? null : payload,
+    message: response.ok ? "Connection updated." : statusMessage(payload, "Connection could not be updated."),
+  }, response.ok ? 200 : response.status);
+}
+
+function moderationResult(text) {
+  const blocked = ["fuck", "shit", "bitch", "asshole", "stupid", "idiot", "kill", "hate"];
+  const hits = blocked.filter((word) => String(text || "").toLowerCase().includes(word));
+  return {
+    allowed: hits.length === 0,
+    hits,
+    rewrite: hits.length
+      ? "I want to say this respectfully and keep the conversation kind. Could we talk about it with patience?"
+      : String(text || ""),
+  };
+}
+
+async function findAcceptedConnection(config, accessToken, userId, otherUserId) {
+  const query = new URLSearchParams({
+    select: "*",
+    status: "eq.accepted",
+    or: "(and(requester_id.eq." + userId + ",recipient_id.eq." + otherUserId + "),and(requester_id.eq." + otherUserId + ",recipient_id.eq." + userId + "))",
+    limit: "1",
+  });
+  const { response, payload } = await supabaseFetch(config, accessToken, "connections", query);
+  return response.ok && Array.isArray(payload) ? payload[0] : null;
+}
+
+async function listMessages(request, env) {
+  const auth = await authenticate(request, env);
+  if (!auth.ok) return auth.response;
+  const url = new URL(request.url);
+  const recipientId = textValue(url.searchParams.get("recipient_id"));
+  const connectionId = textValue(url.searchParams.get("connection_id"));
+  let connection = null;
+  if (connectionId) {
+    const query = new URLSearchParams({ select: "*", id: "eq." + connectionId, status: "eq.accepted", limit: "1" });
+    const result = await supabaseFetch(auth.config, auth.accessToken, "connections", query);
+    connection = result.response.ok && Array.isArray(result.payload) ? result.payload[0] : null;
+  } else if (recipientId) {
+    connection = await findAcceptedConnection(auth.config, auth.accessToken, auth.user.id, recipientId);
+  }
+  if (!connection) return json({ ok: false, message: "Accepted connection is required before chat." }, 403);
+  const query = new URLSearchParams({
+    select: "*",
+    connection_id: "eq." + connection.id,
+    order: "created_at.asc",
+    limit: "100",
+  });
+  const { response, payload } = await supabaseFetch(auth.config, auth.accessToken, "messages", query);
+  const messages = response.ok && Array.isArray(payload)
+    ? await Promise.all(
+        payload.map(async (row) => ({
+          ...row,
+          attachment_public_url: row.attachment_url
+            ? await signedStorageUrl(auth.config, auth.accessToken, "bondbridge-chat", row.attachment_url)
+            : "",
+        })),
+      )
+    : [];
+  return json({
+    ok: response.ok,
+    provider: "supabase",
+    connection,
+    messages,
+    error: response.ok ? null : payload,
+    message: response.ok ? "Messages loaded." : statusMessage(payload, "Messages could not be loaded."),
+  }, response.ok ? 200 : response.status);
+}
+
+async function sendLiveMessage(request, env) {
+  const auth = await authenticate(request, env);
+  if (!auth.ok) return auth.response;
+  const body = await readJson(request);
+  const recipientId = textValue(body.recipient_id);
+  const messageBody = textValue(body.body);
+  const moderation = moderationResult(messageBody);
+  if (!recipientId) return json({ ok: false, message: "Recipient is required." }, 400);
+  if (!messageBody && !body.attachment_path) return json({ ok: false, message: "Write a message or attach a file." }, 400);
+  if (!moderation.allowed) return json({ ok: false, message: "Message blocked for disrespectful language.", moderation }, 400);
+  const connection = await findAcceptedConnection(auth.config, auth.accessToken, auth.user.id, recipientId);
+  if (!connection) return json({ ok: false, message: "Accepted mutual connection is required before chat." }, 403);
+  const row = {
+    connection_id: connection.id,
+    sender_id: auth.user.id,
+    body: messageBody,
+    attachment_url: textValue(body.attachment_path),
+    moderation_result: moderation,
+  };
+  const { response, payload } = await supabaseFetch(auth.config, auth.accessToken, "messages", "", {
+    method: "POST",
+    prefer: "return=representation",
+    body: JSON.stringify(row),
+  });
+  const message = Array.isArray(payload) ? payload[0] : payload;
+  return json({
+    ok: response.ok,
+    provider: "supabase",
+    connection,
+    saved_message: response.ok ? message : null,
+    error: response.ok ? null : payload,
+    message: response.ok ? "Message sent." : statusMessage(payload, "Message could not be sent."),
+  }, response.ok ? 200 : response.status);
+}
+
+async function listFamilyReminders(request, env) {
+  const auth = await authenticate(request, env);
+  if (!auth.ok) return auth.response;
+  const query = new URLSearchParams({ select: "*", user_id: "eq." + auth.user.id, order: "created_at.desc" });
+  const { response, payload } = await supabaseFetch(auth.config, auth.accessToken, "family_reminders", query);
+  return json({
+    ok: response.ok,
+    provider: "supabase",
+    reminders: response.ok && Array.isArray(payload) ? payload : [],
+    error: response.ok ? null : payload,
+    message: response.ok ? "Family reminders loaded." : statusMessage(payload, "Family reminders could not be loaded."),
+  }, response.ok ? 200 : response.status);
+}
+
+async function createFamilyReminder(request, env) {
+  const auth = await authenticate(request, env);
+  if (!auth.ok) return auth.response;
+  const body = await readJson(request);
+  const row = {
+    user_id: auth.user.id,
+    name: textValue(body.name),
+    relationship: textValue(body.relationship, "Friend"),
+    cadence_days: Math.max(1, Math.min(365, Number(body.cadence_days) || 7)),
+    notes: textValue(body.notes),
+  };
+  if (!row.name) return json({ ok: false, message: "Name is required." }, 400);
+  const { response, payload } = await supabaseFetch(auth.config, auth.accessToken, "family_reminders", "", {
+    method: "POST",
+    prefer: "return=representation",
+    body: JSON.stringify(row),
+  });
+  const reminder = Array.isArray(payload) ? payload[0] : payload;
+  return json({
+    ok: response.ok,
+    provider: "supabase",
+    reminder: response.ok ? reminder : null,
+    error: response.ok ? null : payload,
+    message: response.ok ? "Family reminder saved." : statusMessage(payload, "Family reminder could not be saved."),
+  }, response.ok ? 200 : response.status);
+}
+
+async function markFamilyReminderContacted(request, env) {
+  const auth = await authenticate(request, env);
+  if (!auth.ok) return auth.response;
+  const body = await readJson(request);
+  const reminderId = textValue(body.reminder_id);
+  if (!reminderId) return json({ ok: false, message: "Reminder id is required." }, 400);
+  const query = new URLSearchParams({ id: "eq." + reminderId, user_id: "eq." + auth.user.id, select: "*" });
+  const { response, payload } = await supabaseFetch(auth.config, auth.accessToken, "family_reminders", query, {
+    method: "PATCH",
+    prefer: "return=representation",
+    body: JSON.stringify({ last_contact_at: new Date().toISOString().slice(0, 10) }),
+  });
+  const reminder = Array.isArray(payload) ? payload[0] : payload;
+  return json({
+    ok: response.ok,
+    provider: "supabase",
+    reminder: response.ok ? reminder : null,
+    error: response.ok ? null : payload,
+    message: response.ok ? "Family reminder updated." : statusMessage(payload, "Family reminder could not be updated."),
+  }, response.ok ? 200 : response.status);
+}
+
+async function listReports(request, env) {
+  const auth = await authenticate(request, env);
+  if (!auth.ok) return auth.response;
+  const query = new URLSearchParams({ select: "*", reporter_id: "eq." + auth.user.id, order: "created_at.desc" });
+  const { response, payload } = await supabaseFetch(auth.config, auth.accessToken, "reports", query);
+  return json({
+    ok: response.ok,
+    provider: "supabase",
+    reports: response.ok && Array.isArray(payload) ? payload : [],
+    error: response.ok ? null : payload,
+    message: response.ok ? "Reports loaded." : statusMessage(payload, "Reports could not be loaded."),
+  }, response.ok ? 200 : response.status);
+}
+
+async function createReport(request, env) {
+  const auth = await authenticate(request, env);
+  if (!auth.ok) return auth.response;
+  const body = await readJson(request);
+  const reason = textValue(body.reason, "User report");
+  const row = {
+    reporter_id: auth.user.id,
+    reported_user_id: textValue(body.reported_user_id) || null,
+    connection_id: textValue(body.connection_id) || null,
+    reason,
+    status: "open",
+  };
+  const { response, payload } = await supabaseFetch(auth.config, auth.accessToken, "reports", "", {
+    method: "POST",
+    prefer: "return=representation",
+    body: JSON.stringify(row),
+  });
+  const report = Array.isArray(payload) ? payload[0] : payload;
+  return json({
+    ok: response.ok,
+    provider: "supabase",
+    report: response.ok ? report : null,
+    error: response.ok ? null : payload,
+    message: response.ok ? "Safety report created." : statusMessage(payload, "Report could not be created."),
+  }, response.ok ? 200 : response.status);
 }
 
 async function createVideoRoom(request, env) {
@@ -638,6 +1133,20 @@ export default {
     }
 
     if (url.pathname === "/api/profiles" && request.method === "GET") return listProfiles(request, env);
+    if (url.pathname === "/api/me" && request.method === "GET") return currentAccount(request, env);
+    if (url.pathname === "/api/profiles/me" && request.method === "POST") return saveMyProfile(request, env);
+    if (url.pathname === "/api/storage/upload" && request.method === "POST") return uploadStorageFile(request, env);
+    if (url.pathname === "/api/proof" && request.method === "POST") return submitProofDocument(request, env);
+    if (url.pathname === "/api/connections" && request.method === "GET") return listConnections(request, env);
+    if (url.pathname === "/api/connections/request" && request.method === "POST") return requestConnection(request, env);
+    if (url.pathname === "/api/connections/respond" && request.method === "POST") return respondConnection(request, env);
+    if (url.pathname === "/api/messages" && request.method === "GET") return listMessages(request, env);
+    if (url.pathname === "/api/messages" && request.method === "POST") return sendLiveMessage(request, env);
+    if (url.pathname === "/api/family-reminders" && request.method === "GET") return listFamilyReminders(request, env);
+    if (url.pathname === "/api/family-reminders" && request.method === "POST") return createFamilyReminder(request, env);
+    if (url.pathname === "/api/family-reminders/contacted" && request.method === "POST") return markFamilyReminderContacted(request, env);
+    if (url.pathname === "/api/reports" && request.method === "GET") return listReports(request, env);
+    if (url.pathname === "/api/reports" && request.method === "POST") return createReport(request, env);
     if (url.pathname === "/api/checkout" && request.method === "POST") return createCheckout(request, env);
     if (url.pathname === "/api/identity/session" && request.method === "POST") return createIdentitySession(request, env);
     if (url.pathname === "/api/video/room" && request.method === "POST") return createVideoRoom(request, env);

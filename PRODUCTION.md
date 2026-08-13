@@ -8,13 +8,13 @@ The app is deployed on OpenAI Sites and now uses a free launch stack. The only r
 - Browser-native WebRTC for camera, microphone, and screen share.
 - Local safety and coach logic for foul-language blocking, respectful rewrites, and message drafts.
 
-Video rooms are not simulated. `POST /api/video/room` requires a Supabase access token and inserts a real `webrtc_rooms` row. RLS only permits users with approved profile truth to host or join live rooms.
+Video rooms are not simulated. `POST /api/video/room` requires a Supabase access token and inserts a real `webrtc_rooms` row. RLS only permits signed-in users with verified identity, role proof, profile truth, and one-account status to host or join live rooms.
 
 ## Database
 
 1. Create or use the connected Supabase project.
 2. Run `supabase-schema.sql` in the Supabase SQL editor.
-3. Create private storage buckets for `profile-photos`, `proof-documents`, and `chat-attachments`.
+3. Confirm the schema created these Supabase Storage buckets: public `bondbridge-avatars`, private `bondbridge-proofs`, and private `bondbridge-chat`.
 4. Configure email/password auth and production SMTP before a public launch.
 
 ## Sites Environment Variables
@@ -30,8 +30,22 @@ Minimum launch keys:
 
 - `GET /api/status`
 - `GET /api/profiles`
+- `GET /api/me`
+- `POST /api/profiles/me`
 - `POST /api/auth/signup`
 - `POST /api/auth/login`
+- `POST /api/storage/upload`
+- `POST /api/proof`
+- `GET /api/connections`
+- `POST /api/connections/request`
+- `POST /api/connections/respond`
+- `GET /api/messages`
+- `POST /api/messages`
+- `GET /api/family-reminders`
+- `POST /api/family-reminders`
+- `POST /api/family-reminders/contacted`
+- `GET /api/reports`
+- `POST /api/reports`
 - `POST /api/checkout`
 - `POST /api/identity/session`
 - `POST /api/video/room`
@@ -51,4 +65,6 @@ The deployed site is an installable PWA. Users can install it from the in-app In
 
 ## Data Integrity
 
-The app now starts with no fake users, chats, reports, communities, or family reminders. Real users must create an account, add their own profile details, submit proof, and become approved in Supabase before they appear in discovery.
+The app now starts with no fake users, chats, reports, communities, or family reminders. Real users must create an account, add their own profile details, submit proof, and become approved in Supabase before they appear in discovery. Public discovery requires `identity_status`, `role_status`, `gender_status`, and `uniqueness_status` to all be `verified`.
+
+Proof approval, user suspension, report resolution, and verification status changes should be handled by a protected operator workflow or Supabase admin console. The public app does not expose self-approval controls.

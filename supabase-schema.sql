@@ -151,8 +151,9 @@ on public.profiles for select
 using (
   not is_suspended
   and identity_status = 'verified'
-  and role_status in ('pending', 'verified')
+  and role_status = 'verified'
   and gender_status = 'verified'
+  and uniqueness_status = 'verified'
 );
 
 create policy "Users manage own profile"
@@ -234,7 +235,8 @@ using (
       where p.id = (select auth.uid())
         and p.identity_status = 'verified'
         and p.gender_status = 'verified'
-        and p.role_status in ('pending', 'verified')
+        and p.role_status = 'verified'
+        and p.uniqueness_status = 'verified'
         and p.is_suspended = false
     )
   )
@@ -252,7 +254,8 @@ with check (
     where p.id = (select auth.uid())
       and p.identity_status = 'verified'
       and p.gender_status = 'verified'
-      and p.role_status in ('pending', 'verified')
+      and p.role_status = 'verified'
+      and p.uniqueness_status = 'verified'
       and p.is_suspended = false
   )
 );
@@ -273,7 +276,8 @@ using (
       where p.id = (select auth.uid())
         and p.identity_status = 'verified'
         and p.gender_status = 'verified'
-        and p.role_status in ('pending', 'verified')
+        and p.role_status = 'verified'
+        and p.uniqueness_status = 'verified'
         and p.is_suspended = false
     )
   )
@@ -325,3 +329,103 @@ create policy "Senders can delete their own video signals"
 on public.webrtc_signals for delete
 to authenticated
 using (sender_id = (select auth.uid()));
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values
+  ('bondbridge-avatars', 'bondbridge-avatars', true, 5242880, array['image/jpeg','image/png','image/webp','image/gif']),
+  ('bondbridge-proofs', 'bondbridge-proofs', false, 10485760, array['image/jpeg','image/png','image/webp','application/pdf','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document']),
+  ('bondbridge-chat', 'bondbridge-chat', false, 5242880, array['image/jpeg','image/png','image/webp','image/gif','application/pdf','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document'])
+on conflict (id) do update
+set public = excluded.public,
+    file_size_limit = excluded.file_size_limit,
+    allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "BondBridge avatars are publicly readable" on storage.objects;
+drop policy if exists "BondBridge users upload own avatars" on storage.objects;
+drop policy if exists "BondBridge users update own avatars" on storage.objects;
+drop policy if exists "BondBridge users delete own avatars" on storage.objects;
+drop policy if exists "BondBridge users read own proof files" on storage.objects;
+drop policy if exists "BondBridge users upload own proof files" on storage.objects;
+drop policy if exists "BondBridge users update own proof files" on storage.objects;
+drop policy if exists "BondBridge users delete own proof files" on storage.objects;
+drop policy if exists "BondBridge users read own chat files" on storage.objects;
+drop policy if exists "BondBridge chat participants read shared files" on storage.objects;
+drop policy if exists "BondBridge users upload own chat files" on storage.objects;
+drop policy if exists "BondBridge users update own chat files" on storage.objects;
+drop policy if exists "BondBridge users delete own chat files" on storage.objects;
+
+create policy "BondBridge avatars are publicly readable"
+on storage.objects for select
+to public
+using (bucket_id = 'bondbridge-avatars');
+
+create policy "BondBridge users upload own avatars"
+on storage.objects for insert
+to authenticated
+with check (bucket_id = 'bondbridge-avatars' and (select auth.uid())::text = (storage.foldername(name))[1]);
+
+create policy "BondBridge users update own avatars"
+on storage.objects for update
+to authenticated
+using (bucket_id = 'bondbridge-avatars' and (select auth.uid())::text = (storage.foldername(name))[1])
+with check (bucket_id = 'bondbridge-avatars' and (select auth.uid())::text = (storage.foldername(name))[1]);
+
+create policy "BondBridge users delete own avatars"
+on storage.objects for delete
+to authenticated
+using (bucket_id = 'bondbridge-avatars' and (select auth.uid())::text = (storage.foldername(name))[1]);
+
+create policy "BondBridge users read own proof files"
+on storage.objects for select
+to authenticated
+using (bucket_id = 'bondbridge-proofs' and (select auth.uid())::text = (storage.foldername(name))[1]);
+
+create policy "BondBridge users upload own proof files"
+on storage.objects for insert
+to authenticated
+with check (bucket_id = 'bondbridge-proofs' and (select auth.uid())::text = (storage.foldername(name))[1]);
+
+create policy "BondBridge users update own proof files"
+on storage.objects for update
+to authenticated
+using (bucket_id = 'bondbridge-proofs' and (select auth.uid())::text = (storage.foldername(name))[1])
+with check (bucket_id = 'bondbridge-proofs' and (select auth.uid())::text = (storage.foldername(name))[1]);
+
+create policy "BondBridge users delete own proof files"
+on storage.objects for delete
+to authenticated
+using (bucket_id = 'bondbridge-proofs' and (select auth.uid())::text = (storage.foldername(name))[1]);
+
+create policy "BondBridge chat participants read shared files"
+on storage.objects for select
+to authenticated
+using (
+  bucket_id = 'bondbridge-chat'
+  and (
+    (select auth.uid())::text = (storage.foldername(name))[1]
+    or exists (
+      select 1
+      from public.messages m
+      join public.connections c on c.id = m.connection_id
+      where m.attachment_url = storage.objects.name
+        and c.status = 'accepted'
+        and (select auth.uid()) in (c.requester_id, c.recipient_id)
+    )
+  )
+);
+
+create policy "BondBridge users upload own chat files"
+on storage.objects for insert
+to authenticated
+with check (bucket_id = 'bondbridge-chat' and (select auth.uid())::text = (storage.foldername(name))[1]);
+
+create policy "BondBridge users update own chat files"
+on storage.objects for update
+to authenticated
+using (bucket_id = 'bondbridge-chat' and (select auth.uid())::text = (storage.foldername(name))[1])
+with check (bucket_id = 'bondbridge-chat' and (select auth.uid())::text = (storage.foldername(name))[1]);
+
+create policy "BondBridge users delete own chat files"
+on storage.objects for delete
+to authenticated
+using (bucket_id = 'bondbridge-chat' and (select auth.uid())::text = (storage.foldername(name))[1]);
