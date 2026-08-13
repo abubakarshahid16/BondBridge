@@ -1,116 +1,122 @@
-# BondBridge — Setup (do this once, ~10 minutes)
+# BondBridge — Setup
 
-The app code is done and deployed. These are the steps only you can do,
-because they need your Supabase dashboard login.
+I could not do these steps for you: my sandbox is firewalled and every
+Supabase host is blocked, no browser was connected, and I will not type an
+API key into a form. So these are the parts that need your login.
 
-Do them in order. After step 4, real chat and video work between real users.
+I did cut it down to **3 steps, about 5 minutes**, and I tested the SQL
+against a real PostgreSQL 16 database first so it will not fail on you.
 
----
-
-## Step 1 — Create the database tables
-
-1. Go to **https://supabase.com/dashboard** → open your project
-2. Left sidebar → **SQL Editor** → **New query**
-3. Open the file `supabase-schema.sql` from this repo, copy **all** of it, paste, click **Run**
-
-You should see "Success. No rows returned."
+Links below go straight to your project — just click.
 
 ---
 
-## Step 2 — Make it actually work (important)
+## Step 1 — Set up the database  ⏱ 2 min
 
-The base schema has three problems that would leave the app broken:
+**Click:** https://supabase.com/dashboard/project/fpbodwjgypxzqpstwcvo/sql/new
 
-- signing up doesn't create a profile, so the app has no user record
-- every profile is hidden until an admin verifies it — and there is no admin,
-  so the app would look permanently empty
-- realtime is off, so chat wouldn't appear without refreshing
+1. Open `RUN-THIS-IN-SUPABASE.sql` from this repo
+2. Select all → copy → paste into that page
+3. Press **Run** (or Ctrl+Enter)
 
-Step 2 fixes all three.
+Expect: *"BondBridge is ready. Chat, video, profiles and realtime are live."*
 
-1. **SQL Editor** → **New query**
-2. Copy all of `supabase-setup-step2.sql` from this repo, paste, click **Run**
+Ignore any yellow `NOTICE ... does not exist, skipping` lines — those are
+normal and harmless.
 
-You should see: *"BondBridge setup complete. Realtime chat, video and profiles are live."*
+> Use **only** this file. It replaces both `supabase-schema.sql` and
+> `supabase-setup-step2.sql`. Running it twice is safe.
+
+**What I verified before giving it to you**, on a real Postgres 16 instance:
+- runs clean on an empty database
+- running it a second time changes nothing and throws no errors
+- signing up automatically creates a profile — including with missing or
+  junk data (age `7` becomes 18, role `Wizard` becomes Student, blank name
+  becomes "BondBridge member") instead of crashing
+- a stranger cannot read your private messages, and cannot inject a message
+  into someone else's conversation — the database rejects it
+- logged-out visitors *can* see profiles, which is what fixes the
+  "app looks completely empty" bug
 
 ---
 
-## Step 3 — Turn off email confirmation
+## Step 2 — Turn off email confirmation  ⏱ 1 min
 
-Otherwise nobody can log in until they click a confirmation email, which kills
-signups on day one.
+Otherwise nobody can log in until they click a confirmation email, and most
+people never will.
 
-1. **Authentication** → **Sign In / Providers** → **Email**
+**Click:** https://supabase.com/dashboard/project/fpbodwjgypxzqpstwcvo/auth/providers
+
+1. Expand **Email**
 2. Turn **OFF** "Confirm email"
-3. Save
-
-You can turn this back on later once you have real users and want stricter signup.
+3. **Save**
 
 ---
 
-## Step 4 — Add the AI Coach
+## Step 3 — AI Coach  ⏱ 2 min  *(optional)*
 
-Your Groq key must never go in the app's code — the site is public, so anyone
-could read it and burn your quota. It goes in a server-side function instead.
+Skip this and everything else still works — the Coach just uses its built-in
+templates instead of live AI.
 
-1. **Edge Functions** → **Create a new function** → name it exactly **`coach`**
-2. Copy all of `supabase/functions/coach/index.ts` from this repo → paste → **Deploy**
-3. Open the **`coach`** function → **Secrets** (or Settings → Secrets) → add:
+**Click:** https://supabase.com/dashboard/project/fpbodwjgypxzqpstwcvo/functions
 
-   | Name | Value |
-   |---|---|
-   | `GROQ_API_KEY` | your `gsk_...` key |
+1. **Create a new function**, name it exactly `coach`
+2. Paste all of `supabase/functions/coach/index.ts` from this repo → **Deploy**
+3. Open `coach` → **Secrets** → add name `GROQ_API_KEY`, value = your `gsk_...` key
 
-4. Save
-
-If you skip this step, everything else still works — the Coach just falls back
-to its built-in message templates instead of live AI.
+**You have to paste the key yourself.** I don't enter API keys into forms —
+if I'm ever wrong about which field I'm filling, your key leaks. Not a risk
+worth taking to save you one paste.
 
 ---
 
-## Step 5 — Test with a real friend
+## Then test it properly
 
-1. Open **https://abubakarshahid16.github.io/BondBridge/**
-2. You sign up on your phone. Your friend signs up on theirs.
-3. Go to **Discover** — you should see each other
-4. Send a connection request → they accept
-5. Chat — messages should appear on both phones within a second
-6. Try a video call
+1. Open **https://abubakarshahid16.github.io/BondBridge/** on your phone
+2. Have a friend open it on theirs — different phone, ideally different network
+3. Both sign up
+4. **Discover** → you should see each other
+5. Send a request → they accept
+6. Chat — messages should land within about a second
+7. Try a video call
 
-If something doesn't work, tell me exactly which step failed and what you saw.
+If a step fails, tell me which one and what you saw on screen.
 
 ---
 
-## Things worth knowing
+## One more thing I couldn't push
 
-**Your keys.** The `sb_publishable_...` key is *meant* to be public — Row Level
-Security in the database is what actually protects data. The Groq key is not:
-it lives only in the Edge Function secret.
+The GitHub token you gave me lacks `workflow` scope, so I couldn't commit
+`.github/workflows/keep-supabase-awake.yml`. It's in the repo as
+**`keep-supabase-awake.workflow.txt`**.
 
-**Supabase pausing.** Free projects sleep after ~7 days of no traffic. A GitHub
-Action (`.github/workflows/keep-supabase-awake.yml`) pings it every 3 days so
-your link never dies. It's already committed — nothing to do.
+Add it via GitHub → **Actions** → **New workflow** → **set up a workflow
+yourself** → paste → commit.
 
-**Verification badges.** Everyone with a completed profile is discoverable.
-Uploading role proof sets their status to *pending*. To approve someone, run
-this in the SQL Editor:
+Without it, Supabase free projects sleep after ~7 idle days and your link
+goes dead — which is exactly when a LinkedIn visitor might click it.
+
+---
+
+## Worth knowing before you launch
+
+**Your keys.** The `sb_publishable_...` key is *meant* to be public — Row
+Level Security is what actually protects the data, and I tested that it does.
+The Groq key is different and stays in the Edge Function secret only.
+
+**Approving a verification badge.** Everyone with a complete profile is
+discoverable. Uploading role proof sets them to *pending*. To approve:
 
 ```sql
 update public.profiles set role_status = 'verified' where id = 'THE-USER-ID';
 ```
 
-**Video calls.** Browser-to-browser, no server cost. Works for roughly 75-80% of
-people. The rest are behind strict firewalls or corporate wifi and need a TURN
-relay server — that's the one piece that isn't free at scale. Worth knowing
-before you promise "video calls for everyone" on LinkedIn.
+**Video calls** work browser-to-browser for roughly 75-80% of people. The rest
+sit behind strict firewalls or corporate wifi and need a TURN relay server —
+the one piece that isn't free at scale. Don't promise "video for everyone."
 
-**Free tier limits.** 50,000 monthly users, 500MB database, 5GB bandwidth.
-You will not hit these for a long time.
+**Free tier:** 50,000 monthly users, 500MB database, 5GB bandwidth. You are
+nowhere near this.
 
----
-
-## Before you post on LinkedIn
-
-Test with 3-5 real friends on real phones and different networks first. A
-LinkedIn launch is one shot — if someone clicks and chat is broken, they don't
-come back.
+**Before LinkedIn:** test with 3-5 real friends first. A launch post is one
+shot — if someone clicks and chat is broken, they don't come back.
