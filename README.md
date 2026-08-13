@@ -26,6 +26,18 @@ Desktop Chrome / Edge:
 1. Open the GitHub Pages app link.
 2. Click the install icon in the address bar, or use browser menu > Install app.
 
+## One-Time GitHub Pages Switch
+
+The workflow already builds and pushes the installable app to the `gh-pages` branch. For a brand-new repo, GitHub requires the owner to enable Pages once:
+
+1. Open `Settings` in this repo.
+2. Open `Pages` from the left sidebar.
+3. Under `Build and deployment`, set `Source` to `Deploy from a branch`.
+4. Set `Branch` to `gh-pages` and folder to `/ (root)`.
+5. Click `Save`.
+
+After saving, the app should be live at https://abubakarshahid16.github.io/BondBridge/ within 1-3 minutes.
+
 ## What Is Included
 
 - Instagram-style feed and story UI
@@ -46,6 +58,6 @@ This version avoids paid APIs. It uses the live production site for API routes a
 
 ## GitHub Pages Deployment
 
-The workflow in `.github/workflows/deploy-pages.yml` mirrors the live production app into GitHub Pages and deploys it as an installable PWA.
+The workflow in `.github/workflows/deploy-pages.yml` mirrors the live production app into the `gh-pages` branch as an installable PWA.
 
 Important: GitHub Pages may take 1-3 minutes after each workflow run before the public URL is live.
