@@ -1,19 +1,20 @@
 const STORAGE_KEY = "bondbridge-verified-live-v3";
 const LEGACY_STORAGE_KEYS = ["bondbridge-verified-v1", "bondbridge-verified-live-v2"];
 
+// User-facing nav (8 items). "launch" is dev-only (URL param ?dev=1).
 const views = [
   ["dashboard", "Home", "home"],
-  ["auth", "Account", "key"],
-  ["verify", "Verify", "shield"],
-  ["discover", "Meet People", "search"],
+  ["discover", "Discover", "search"],
   ["connections", "Requests", "users"],
   ["chat", "Chat", "message"],
   ["family", "Family", "heart"],
   ["coach", "Coach", "sparkles"],
-  ["admin", "Safety", "lock"],
-  ["launch", "Launch", "rocket"],
-  ["privacy", "Data", "database"],
+  ["verify", "Verify", "shield"],
+  ["settings", "Settings", "database"],
 ];
+
+// Extra views that are accessible but not shown in the sidebar nav
+const hiddenViews = ["auth", "landing", "admin", "launch", "privacy"];
 
 const purposeOptions = [
   "Any",
@@ -113,9 +114,149 @@ const launchProviders = [
   },
 ];
 
+// ─── Demo profiles shown when Supabase has no real verified users ───────────
+function getDemoProfiles() {
+  return [
+    {
+      id: "demo-1",
+      name: "Aisha Rahman",
+      age: 22,
+      gender: "Female",
+      country: "Pakistan",
+      city: "Lahore",
+      role: "Student",
+      field: "Computer Science",
+      organization: "LUMS",
+      languages: ["English", "Urdu"],
+      purposes: ["Study partner", "Friendship"],
+      respectScore: 98,
+      verified: ["Real identity", "Student proof", "Profile truth", "One account"],
+      about: "CS student passionate about AI and building things that matter.",
+      connectionStyle: "Respectful and consent-first.",
+      profilePhoto: "",
+      status: "active",
+      isDemo: true,
+    },
+    {
+      id: "demo-2",
+      name: "Omar Siddiqui",
+      age: 26,
+      gender: "Male",
+      country: "UAE",
+      city: "Dubai",
+      role: "Professional",
+      field: "Business",
+      organization: "Dubai Startup Hub",
+      languages: ["English", "Arabic", "Urdu"],
+      purposes: ["Career network", "Culture exchange"],
+      respectScore: 95,
+      verified: ["Real identity", "Professional proof", "Profile truth", "One account"],
+      about: "Entrepreneur working on EdTech. Love connecting with people across cultures.",
+      connectionStyle: "Respectful and consent-first.",
+      profilePhoto: "",
+      status: "active",
+      isDemo: true,
+    },
+    {
+      id: "demo-3",
+      name: "Sara Malik",
+      age: 24,
+      gender: "Female",
+      country: "UK",
+      city: "London",
+      role: "Student",
+      field: "Medicine",
+      organization: "King's College London",
+      languages: ["English", "Urdu"],
+      purposes: ["Study partner", "Friendship", "Culture exchange"],
+      respectScore: 97,
+      verified: ["Real identity", "Student proof", "Profile truth", "One account"],
+      about: "Medical student. Interested in health tech and global connections.",
+      connectionStyle: "Respectful and consent-first.",
+      profilePhoto: "",
+      status: "active",
+      isDemo: true,
+    },
+    {
+      id: "demo-4",
+      name: "Ahmed Hassan",
+      age: 28,
+      gender: "Male",
+      country: "Egypt",
+      city: "Cairo",
+      role: "Professional",
+      field: "Engineering",
+      organization: "Cairo University",
+      languages: ["English", "Arabic"],
+      purposes: ["Career network", "Language practice", "Friendship"],
+      respectScore: 93,
+      verified: ["Real identity", "Professional proof", "Profile truth", "One account"],
+      about: "Software engineer building the next generation of Arab tech.",
+      connectionStyle: "Respectful and consent-first.",
+      profilePhoto: "",
+      status: "active",
+      isDemo: true,
+    },
+    {
+      id: "demo-5",
+      name: "Fatima Al-Zahra",
+      age: 23,
+      gender: "Female",
+      country: "Saudi Arabia",
+      city: "Riyadh",
+      role: "Student",
+      field: "Data Science",
+      organization: "King Abdulaziz University",
+      languages: ["English", "Arabic"],
+      purposes: ["Study partner", "Career network"],
+      respectScore: 96,
+      verified: ["Real identity", "Student proof", "Profile truth", "One account"],
+      about: "Data science student working on NLP for Arabic text.",
+      connectionStyle: "Respectful and consent-first.",
+      profilePhoto: "",
+      status: "active",
+      isDemo: true,
+    },
+    {
+      id: "demo-6",
+      name: "Bilal Chaudhry",
+      age: 30,
+      gender: "Male",
+      country: "Canada",
+      city: "Toronto",
+      role: "Professional",
+      field: "Design",
+      organization: "Shopify",
+      languages: ["English", "French", "Urdu"],
+      purposes: ["Career network", "Culture exchange", "Friendship"],
+      respectScore: 94,
+      verified: ["Real identity", "Professional proof", "Profile truth", "One account"],
+      about: "UX designer at Shopify. Passionate about inclusive design.",
+      connectionStyle: "Respectful and consent-first.",
+      profilePhoto: "",
+      status: "active",
+      isDemo: true,
+    },
+  ];
+}
+
+function isDemoMode() {
+  // Demo mode when Supabase has returned no profiles
+  return state.profiles.filter((p) => !p.isDemo).length === 0;
+}
+
+function getAllProfiles() {
+  // Merge real profiles with demo profiles (demo shown only when no real ones)
+  const real = state.profiles.filter((p) => !p.isDemo);
+  if (real.length > 0) return state.profiles;
+  return getDemoProfiles();
+}
+
 function createInitialState() {
   return {
-    view: "dashboard",
+    view: "landing",
+    guestMode: false,
+    authTab: "login",
     theme: "dark",
     verifyStep: "profile",
     selectedChat: "",
@@ -225,6 +366,8 @@ function loadState() {
       launch: { ...defaults.launch, ...(saved.launch || {}) },
       live: { ...defaults.live, ...(saved.live || {}) },
       auth: { ...defaults.auth, ...(saved.auth || {}) },
+      guestMode: saved.guestMode || false,
+      authTab: saved.authTab || "login",
     };
   } catch {
     return defaults;
@@ -234,7 +377,12 @@ function loadState() {
 let state = loadState();
 LEGACY_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
 const urlView = new URLSearchParams(window.location.search).get("view");
-if (views.some(([id]) => id === urlView)) state.view = urlView;
+const allViewIds = [...views.map(([id]) => id), ...hiddenViews];
+if (allViewIds.includes(urlView)) state.view = urlView;
+// Dev mode: ?dev=1 unlocks the Launch screen
+if (new URLSearchParams(window.location.search).get("dev") === "1") {
+  state.devMode = true;
+}
 
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -318,9 +466,7 @@ function optionList(options, selected) {
     .join("");
 }
 
-function profileById(id) {
-  return state.profiles.find((profile) => profile.id === id);
-}
+// profileById is defined later (after getAllProfiles) to include demo profiles
 
 function requestFor(profileId) {
   return state.requests.find((request) => request.profileId === profileId);
@@ -333,7 +479,8 @@ function isSignedIn() {
 function requireSignedIn(action) {
   if (isSignedIn()) return true;
   state.view = "auth";
-  toast(`Log in before ${action}.`);
+  state.authTab = "login";
+  toast(`Please sign in to ${action}.`);
   saveState();
   render();
   return false;
@@ -417,7 +564,24 @@ function verificationBadge(status) {
 function render() {
   document.documentElement.dataset.theme = state.theme || "dark";
   const app = document.querySelector("#app");
+
+  // Show landing page when not signed in and not explicitly on auth/landing
+  if (!isSignedIn() && !["auth", "landing"].includes(state.view) && !state.guestMode) {
+    state.view = "landing";
+  }
+
   app.dataset.view = state.view;
+
+  // Full-screen layouts (no sidebar/topbar)
+  if (state.view === "landing") {
+    app.innerHTML = renderLanding();
+    return;
+  }
+  if (state.view === "auth") {
+    app.innerHTML = renderAuthPage();
+    return;
+  }
+
   app.innerHTML = `
     ${renderSidebar()}
     <main class="main">
@@ -434,16 +598,36 @@ function render() {
 }
 
 function renderSidebar() {
+  const pendingCount = state.requests.filter((r) => r.status === "pending").length;
+
   const nav = views
     .map(
-      ([id, label, iconName]) => `
-        <button class="nav-button ${state.view === id ? "active" : ""}" data-view="${id}" title="${escapeHtml(label)}">
-          ${icon(iconName)}
-          <span>${escapeHtml(label)}</span>
-        </button>
-      `,
+      ([id, label, iconName]) => {
+        const badge = id === "connections" && pendingCount > 0 ? `<span class="nav-badge">${pendingCount}</span>` : "";
+        return `
+          <button class="nav-button ${state.view === id ? "active" : ""}" data-view="${id}" title="${escapeHtml(label)}">
+            ${icon(iconName)}
+            <span>${escapeHtml(label)}</span>
+            ${badge}
+          </button>
+        `;
+      },
     )
     .join("");
+
+  const user = state.currentUser;
+  const userArea = isSignedIn()
+    ? `<div class="sidebar-user">
+        ${avatarNode(user, "sm")}
+        <div>
+          <strong>${escapeHtml(displayName(user.name, "You"))}</strong>
+          <small>${escapeHtml(user.role)} · ${trustCompletion()}% verified</small>
+        </div>
+        <button class="nav-button-icon" data-view="settings" title="Settings">${icon("database", true)}</button>
+      </div>`
+    : `<div class="sidebar-user">
+        <button class="button gradient sidebar-signin-btn" data-view="auth">${icon("key")}Sign in</button>
+      </div>`;
 
   return `
     <aside class="sidebar">
@@ -456,32 +640,30 @@ function renderSidebar() {
       </div>
       <nav class="nav-group" aria-label="Main navigation">
         ${nav}
-        <button class="nav-button theme-nav" data-action="toggle-theme" title="Switch ${state.theme === "dark" ? "light" : "dark"} mode">
+        <button class="nav-button theme-nav" data-action="toggle-theme" title="Switch theme">
           ${icon(state.theme === "dark" ? "sun" : "moon")}
           <span>${state.theme === "dark" ? "Light mode" : "Dark mode"}</span>
         </button>
       </nav>
-      <div class="sidebar-note">
-        <h3>Safe by design</h3>
-        <p>Verified identity, mutual requests, respectful chat, and family reminders in one simple place.</p>
-      </div>
+      ${userArea}
     </aside>
   `;
 }
 
 function renderTopbar() {
   const titles = {
-    dashboard: ["BondBridge", "Verified social connection feed."],
-    auth: ["Account", "Create your real account, then verify before discovery."],
-    verify: ["Get Verified", "Prove your identity, student/professional role, and one-account status."],
-    discover: ["Meet People", "Choose a purpose, country, field, or community before sending a request."],
-    connections: ["Requests", "Accept only the people you want. Private chat opens after both sides agree."],
-    chat: ["Chat", "Write clearly, stay respectful, and request calls only with consent."],
-    family: ["Family", "Simple reminders help you call, message, and reconnect before bonds fade."],
-    coach: ["Coach", "Get help writing messages, apologizing, reconnecting, or starting a conversation."],
-    admin: ["Safety", "Review reports, proof queues, respect scores, and account actions."],
-    launch: ["Launch", "Free Supabase, browser video, proof review, and local safety are connected."],
-    privacy: ["Data", "Export, reset, and understand what this app stores locally."],
+    dashboard: ["Home", "Your verified connection feed."],
+    auth: ["Sign In", "Create or access your BondBridge account."],
+    verify: ["Get Verified", "Prove your identity, role, and one-account status."],
+    discover: ["Discover", "Find verified students and professionals to connect with."],
+    connections: ["Requests", "Accept the people you want — private chat opens after both agree."],
+    chat: ["Chat", "Write respectfully. Call only with consent."],
+    family: ["Family", "Simple reminders so bonds don't fade over distance."],
+    coach: ["Coach", "Get help writing messages, reconnecting, or starting a conversation."],
+    admin: ["Safety", "Your reports and verification queue."],
+    launch: ["Developer", "Backend status and API testing."],
+    privacy: ["Data", "Export, reset, and control your local data."],
+    settings: ["Settings", "Your account, privacy, and safety in one place."],
   };
   const [title, subtitle] = titles[state.view] || titles.dashboard;
   const installed = isStandaloneApp();
@@ -503,7 +685,7 @@ function renderTopbar() {
 function renderView() {
   const renderers = {
     dashboard: renderDashboard,
-    auth: renderAuth,
+    auth: renderAuthPage,
     verify: renderVerify,
     discover: renderDiscover,
     connections: renderConnections,
@@ -513,6 +695,7 @@ function renderView() {
     admin: renderAdmin,
     launch: renderLaunch,
     privacy: renderPrivacy,
+    settings: renderSettings,
   };
   return (renderers[state.view] || renderDashboard)();
 }
@@ -524,14 +707,44 @@ function renderDashboard() {
   const nextFamily = dueContacts[0] || state.family[0];
   const topMatch = getFilteredProfiles()[0];
   const loungeProfile = getCurrentMeetProfile();
+  const inDemoMode = isDemoMode();
 
   return `
     <section class="insta-feed">
+      ${!isSignedIn() ? renderWelcomeBanner() : ""}
+      ${inDemoMode ? renderDemoBanner() : ""}
       ${renderInstaStories()}
       ${renderMeetPost(loungeProfile, topMatch)}
       ${renderFamilyPost(nextFamily, dueContacts.length)}
       ${renderSafetyPost(pendingRequests, accepted)}
     </section>
+  `;
+}
+
+function renderWelcomeBanner() {
+  return `
+    <article class="insta-post card pad welcome-banner">
+      <div class="welcome-inner">
+        <span class="welcome-icon">${icon("heart")}</span>
+        <div>
+          <h2>Welcome to BondBridge</h2>
+          <p>You're exploring as a guest. Sign up to connect with verified people, send requests, and chat.</p>
+          <div class="row wrap" style="margin-top:12px">
+            <button class="button gradient" data-action="go-signup">${icon("plus")}Create account</button>
+            <button class="button" data-action="go-login">${icon("key")}Log in</button>
+          </div>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function renderDemoBanner() {
+  return `
+    <article class="demo-notice">
+      ${icon("sparkles", true)}
+      <span>You're seeing <strong>demo profiles</strong>. Real verified users will appear here after they sign up and complete verification.</span>
+    </article>
   `;
 }
 
@@ -583,7 +796,7 @@ function renderMeetPost(profile, topMatch) {
         <div>
           <p class="eyebrow">Live discovery</p>
           <h2 class="section-title">No verified people are live yet</h2>
-          <p class="text-muted">Create a real account, complete verification, and connect Supabase so live approved users appear here.</p>
+          <p class="text-muted">Sign up and complete verification to start meeting verified people.</p>
         </div>
         <div class="row wrap">
           <button class="button primary" data-view="auth" title="Create account">${icon("key")}Account</button>
@@ -787,7 +1000,7 @@ function renderMeetLounge(profile) {
       <article class="card pad meet-lounge">
         <p class="eyebrow">Verified meet</p>
         <h2 class="section-title">No live verified stranger is ready</h2>
-        <p class="text-muted">Live people appear after real users sign up, pass verification, and are returned by Supabase.</p>
+        <p class="text-muted">Live video intros will be available once verified users are in your area. Browse profiles to send a connection request instead.</p>
         <div class="row wrap">
           <button class="button primary" data-view="auth" title="Create account">${icon("key")}Account</button>
           <button class="button" data-action="refresh-live-profiles" title="Refresh live users">${icon("server")}Refresh</button>
@@ -1141,7 +1354,7 @@ function getFilteredProfiles() {
   const { country, purpose, field: fieldFilter, gender, search } = state.filters;
   const query = search.trim().toLowerCase();
 
-  return state.profiles
+  return getAllProfiles()
     .filter((profile) => profile.status === "active")
     .filter((profile) => !state.skipped.includes(profile.id))
     .filter((profile) => country === "Any" || profile.country === country)
@@ -1214,14 +1427,14 @@ function renderDiscover() {
       ${
         profiles.length
           ? `<div class="section-heading"><h2 class="section-title">${profiles.length} respectful match${profiles.length === 1 ? "" : "es"}</h2><p class="small text-muted">Sorted by respect score, shared interests, field, and language.</p></div><div class="profile-reel">${profiles.map(renderProfileCard).join("")}</div>`
-          : `<div class="empty">No live verified profiles returned yet. Create an account, complete proof, or refresh the live database.</div>`
+          : `<div class="empty">No verified profiles yet. Be one of the first — sign up and complete verification to appear here.</div>`
       }
 
       <article class="request-group">
         <p class="eyebrow">Verified circles</p>
         <h2 class="section-title">Group spaces before private trust</h2>
         <div class="community-reel">
-          ${state.communities.length ? state.communities.map(renderCommunity).join("") : `<div class="empty">Live circles will appear after the database has approved groups.</div>`}
+          ${state.communities.length ? state.communities.map(renderCommunity).join("") : `<div class="empty">Verified community circles are coming soon. Stay tuned!</div>`}
         </div>
       </article>
     </section>
@@ -1780,6 +1993,228 @@ function renderPlanCard(name, label, detail, plan) {
   `;
 }
 
+// ─── Landing / Welcome screen (shown when not signed in) ────────────────────
+function renderLanding() {
+  return `
+    <div class="landing-shell" data-theme="${escapeHtml(state.theme || "dark")}">
+      <button class="landing-theme" data-action="toggle-theme" title="Switch theme">
+        ${icon(state.theme === "dark" ? "sun" : "moon")}
+      </button>
+
+      <div class="landing-hero">
+        <div class="landing-logo">
+          ${icon("heart")}
+        </div>
+        <h1 class="landing-title">BondBridge</h1>
+        <p class="landing-tagline">Real people. Verified. Better bonds.</p>
+        <p class="landing-sub">Connect with verified students, professionals, and families — safely and respectfully.</p>
+
+        <div class="landing-actions">
+          <button class="button gradient landing-btn" data-action="go-signup" title="Create account">
+            ${icon("plus")} Create account
+          </button>
+          <button class="button landing-btn-outline" data-action="go-login" title="Log in">
+            ${icon("key")} Log in
+          </button>
+          <button class="button landing-btn-ghost" data-action="guest-mode" title="Explore without signing in">
+            Explore as guest
+          </button>
+        </div>
+      </div>
+
+      <div class="landing-features">
+        <div class="landing-feature">
+          ${icon("shield")}
+          <strong>Verified Only</strong>
+          <span>Every user proves real identity — no fake accounts.</span>
+        </div>
+        <div class="landing-feature">
+          ${icon("message")}
+          <strong>Mutual Chat</strong>
+          <span>Private chat only opens when both people agree.</span>
+        </div>
+        <div class="landing-feature">
+          ${icon("heart")}
+          <strong>Family First</strong>
+          <span>Reminders to stay connected with the people who matter most.</span>
+        </div>
+        <div class="landing-feature">
+          ${icon("sparkles")}
+          <strong>AI Coach</strong>
+          <span>Get help writing respectful, clear, and warm messages.</span>
+        </div>
+      </div>
+
+      <p class="landing-footer">By signing up you agree to use this platform respectfully and honestly.</p>
+    </div>
+  `;
+}
+
+// ─── Auth page (full-screen signup/login) ───────────────────────────────────
+function renderAuthPage() {
+  const signedIn = isSignedIn();
+  const tab = state.authTab || "login";
+
+  if (signedIn) {
+    return `
+      <div class="auth-fullpage">
+        <div class="auth-fullpage-inner">
+          <button class="auth-back" data-view="dashboard">${icon("home", true)} Back to home</button>
+          <div class="auth-signed-in-card">
+            <span class="check-dot">${icon("check")}</span>
+            <div>
+              <h2>You're signed in</h2>
+              <p>${escapeHtml(state.auth.email || state.currentUser.name || "Your account is active.")}</p>
+              <p class="small text-muted">Trust score: ${trustCompletion()}% · ${state.profiles.filter(p=>!p.isDemo).length} live verified users</p>
+            </div>
+            <div class="row wrap">
+              <button class="button primary" data-view="discover">${icon("search")}Discover</button>
+              <button class="button" data-view="verify">${icon("shield")}Get verified</button>
+              <button class="button danger" data-action="auth-logout">${icon("ban")}Sign out</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="auth-fullpage">
+      <div class="auth-fullpage-inner">
+        <button class="auth-back" data-action="go-landing">${icon("heart", true)} BondBridge</button>
+
+        <div class="auth-tabs">
+          <button class="auth-tab ${tab === "login" ? "active" : ""}" data-action="auth-tab-login">Log In</button>
+          <button class="auth-tab ${tab === "signup" ? "active" : ""}" data-action="auth-tab-signup">Sign Up</button>
+        </div>
+
+        ${tab === "login" ? renderLoginForm() : renderSignupForm()}
+      </div>
+    </div>
+  `;
+}
+
+function renderLoginForm() {
+  return `
+    <div class="auth-form-card">
+      <h2>Welcome back</h2>
+      <p class="text-muted">Log in to your BondBridge account.</p>
+      <div class="auth-form-fields">
+        ${field("Email", "auth-email", state.auth.email, "email")}
+        ${field("Password", "auth-password", "", "password")}
+      </div>
+      <button class="button gradient large auth-submit" data-action="auth-login">${icon("key")} Log in</button>
+      <p class="auth-switch">Don't have an account? <button class="link-button" data-action="auth-tab-signup">Sign up free</button></p>
+    </div>
+  `;
+}
+
+function renderSignupForm() {
+  return `
+    <div class="auth-form-card">
+      <h2>Join BondBridge</h2>
+      <p class="text-muted">Create your verified account — use real details.</p>
+      <div class="auth-form-fields">
+        ${field("Full name", "auth-name", state.auth.name || state.currentUser.name, "text", "wide")}
+        ${field("Email", "auth-email", state.auth.email, "email")}
+        ${field("Password", "auth-password", "", "password")}
+        ${selectField("I am a", "auth-role", ["Student", "Professional"], state.auth.role)}
+        ${field("Country", "auth-country", state.auth.country || state.currentUser.country)}
+      </div>
+      <button class="button gradient large auth-submit" data-action="auth-signup">${icon("plus")} Create account</button>
+      <p class="auth-switch">Already have an account? <button class="link-button" data-action="auth-tab-login">Log in</button></p>
+    </div>
+  `;
+}
+
+// ─── Settings view (replaces separate admin + privacy pages) ─────────────────
+function renderSettings() {
+  const signedIn = isSignedIn();
+  const counts = {
+    profiles: getAllProfiles().filter(p => !p.isDemo).length,
+    family: state.family.length,
+    chats: Object.values(state.chats).reduce((sum, list) => sum + list.length, 0),
+    reports: state.reports.length,
+  };
+
+  return `
+    <section class="settings-screen">
+      <div class="settings-sections">
+
+        <article class="settings-block">
+          <p class="eyebrow">Account</p>
+          <h2>${signedIn ? escapeHtml(displayName(state.currentUser.name)) : "Not signed in"}</h2>
+          ${signedIn
+            ? `<p class="text-muted">${escapeHtml(state.auth.email || "")} · Trust ${trustCompletion()}%</p>
+               <div class="row wrap" style="margin-top:12px">
+                 <button class="button primary" data-view="verify">${icon("shield")}Get verified</button>
+                 <button class="button danger" data-action="auth-logout">${icon("ban")}Sign out</button>
+               </div>`
+            : `<button class="button gradient" data-view="auth">${icon("key")}Sign in / Sign up</button>`
+          }
+        </article>
+
+        <article class="settings-block">
+          <p class="eyebrow">Your data</p>
+          <h2>Privacy & storage</h2>
+          <div class="metric-strip" style="margin:12px 0">
+            ${metricPill("Live users", counts.profiles)}
+            ${metricPill("Messages", counts.chats)}
+            ${metricPill("Family", counts.family)}
+            ${metricPill("Reports", counts.reports)}
+          </div>
+          <div class="settings-list">
+            <button class="settings-row" data-action="export-data">
+              <span>${icon("download")}</span>
+              <div><strong>Export my data</strong><small>Download a copy of everything stored here</small></div>
+            </button>
+            <button class="settings-row" data-action="restore-skipped">
+              <span>${icon("check")}</span>
+              <div><strong>Restore skipped profiles</strong><small>Bring back people you passed on</small></div>
+            </button>
+            <button class="settings-row danger" data-action="reset-data">
+              <span>${icon("trash")}</span>
+              <div><strong>Reset all data</strong><small>Clears everything stored in this browser</small></div>
+            </button>
+          </div>
+        </article>
+
+        ${state.reports.length || state.currentUser.proofQueue.length ? `
+        <article class="settings-block">
+          <p class="eyebrow">Safety</p>
+          <h2>Your reports & verification</h2>
+          <div class="list">
+            ${state.reports.slice(0, 5).map((report) => {
+              const profile = profileById(report.profileId);
+              return `
+                <div class="request-row">
+                  <div>
+                    <strong>${escapeHtml(profile ? profile.name : "Unknown user")}</strong>
+                    <p class="small text-muted">${escapeHtml(report.message)}</p>
+                  </div>
+                  <span class="badge ${report.priority === "High" ? "rose" : "amber"}">${escapeHtml(report.status || "open")}</span>
+                </div>
+              `;
+            }).join("")}
+          </div>
+        </article>
+        ` : ""}
+
+        <article class="settings-block">
+          <p class="eyebrow">Appearance</p>
+          <h2>Theme</h2>
+          <button class="settings-row" data-action="toggle-theme">
+            <span>${icon(state.theme === "dark" ? "sun" : "moon")}</span>
+            <div><strong>${state.theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}</strong><small>Currently ${state.theme} mode</small></div>
+          </button>
+        </article>
+
+      </div>
+    </section>
+  `;
+}
+
+// ─── OLD renderAuth kept for backward compat — now replaced by renderAuthPage ─
 function renderAuth() {
   const result = state.auth.result;
   const signedIn = isSignedIn();
@@ -1825,14 +2260,14 @@ function renderAuth() {
         </article>
       </div>
 
-      <article class="auth-result">
+      ${result ? `
+      <article class="auth-result-clean ${result.title.toLowerCase().includes("unavailable") || result.title.toLowerCase().includes("error") ? "error" : "success"}">
+        <span>${icon(result.title.toLowerCase().includes("unavailable") || result.title.toLowerCase().includes("error") ? "ban" : "check", true)}</span>
         <div>
-          <p class="eyebrow">Latest response</p>
-          <h3>${result ? escapeHtml(result.title) : "Nothing submitted yet"}</h3>
-          <p>${result ? escapeHtml(result.message) : "Signup, login, and live-user sync results will appear here."}</p>
+          <strong>${escapeHtml(result.title)}</strong>
+          <p>${escapeHtml(result.message)}</p>
         </div>
-        <pre>${escapeHtml(result ? JSON.stringify(result.payload, null, 2) : "{ }")}</pre>
-      </article>
+      </article>` : ""}
     </section>
   `;
 }
@@ -1878,11 +2313,13 @@ function renderLaunch() {
 
       <article class="launch-panel">
         <div>
-          <p class="eyebrow">API result</p>
+          <p class="eyebrow">Result</p>
           <h3>${result ? escapeHtml(result.title) : "No action tested yet"}</h3>
           <p>${result ? escapeHtml(result.message) : "Run a backend check, safety test, free video room, or proof review action."}</p>
         </div>
-        <pre>${escapeHtml(result ? JSON.stringify(result.payload, null, 2) : "{ }")}</pre>
+        ${result ? `<div class="launch-result-badges">
+          <span class="badge ${result.title.includes("unavailable") ? "rose" : "green"}">${result.title.includes("unavailable") ? "Needs setup" : "Connected"}</span>
+        </div>` : ""}
       </article>
     </section>
   `;
@@ -2184,16 +2621,31 @@ async function saveProfile() {
       return;
     }
     applyProfileRowToCurrentUser(result.payload?.profile);
-    toast("Profile synced to Supabase.");
+    toast("Profile saved and synced.");
   } else {
-    toast("Profile saved locally. Log in to sync it.");
+    toast("Profile saved locally. Sign in to sync across devices.");
   }
   saveState();
+}
+
+function profileById(id) {
+  // Check real profiles first, then demo profiles
+  return state.profiles.find((p) => p.id === id) || getAllProfiles().find((p) => p.id === id);
 }
 
 async function connect(profileId) {
   const profile = profileById(profileId);
   if (!profile) return;
+
+  // Demo profile — prompt to sign up instead of sending a real request
+  if (profile.isDemo) {
+    toast("Sign up to send real connection requests to verified people.");
+    state.view = "auth";
+    state.authTab = "signup";
+    saveState();
+    render();
+    return;
+  }
   if (requestFor(profileId) || state.connections.includes(profileId)) {
     toast("This person is already in your request or connection list.");
     return;
@@ -2330,45 +2782,57 @@ async function sendMessage() {
   if (!text && !file) return;
   if (hasAbuse(text)) {
     state.moderationLog.unshift("Blocked outgoing message for disrespectful language.");
-    toast("Message blocked. Please rewrite it respectfully.");
+    toast("Message blocked — please rewrite it respectfully.");
     return;
   }
   const profileId = state.selectedChat;
   if (!profileId) return;
-  if (!requireSignedIn("sending a real message")) return;
 
+  // Build attachment locally first (works without Supabase)
   let attachment = null;
-  let attachmentPath = "";
-  try {
-    if (file) {
+  if (file) {
+    try {
       attachment = await buildChatAttachment();
-      const uploaded = await uploadFileToStorage("bondbridge-chat", file);
-      attachmentPath = uploaded?.path || "";
+    } catch (error) {
+      toast("Could not read the attachment. Try again.");
+      return;
     }
-  } catch (error) {
-    toast(error.message || "Attachment upload failed.");
-    return;
   }
 
-  const result = await apiJson("/api/messages", {
-    method: "POST",
-    auth: true,
-    body: JSON.stringify({
-      recipient_id: profileId,
-      body: text,
-      attachment_path: attachmentPath,
-    }),
-  });
-  if (!result.ok) {
-    toast(result.payload?.message || "Message could not be sent.");
-    return;
-  }
-
+  // Save message locally immediately so UX feels instant
   if (!state.chats[profileId]) state.chats[profileId] = [];
-  state.chats[profileId].push({ from: "me", text, attachment, time: nowTime() });
+  state.chats[profileId].push({
+    id: `msg-${Date.now()}`,
+    from: "me",
+    text,
+    attachment,
+    time: nowTime(),
+  });
   if (input) input.value = "";
-  toast("Message sent to Supabase.");
-  await refreshMessages(profileId, false);
+  // Clear attachment input
+  const attachInput = document.querySelector("#chat-attachment");
+  if (attachInput) attachInput.value = "";
+
+  saveState();
+  render();
+
+  // Optionally try to sync to Supabase if signed in (non-blocking)
+  if (isSignedIn()) {
+    let attachmentPath = "";
+    if (file && attachment) {
+      try {
+        const uploaded = await uploadFileToStorage("bondbridge-chat", file);
+        attachmentPath = uploaded?.path || "";
+      } catch (_) {
+        // Attachment stays local — not a fatal error
+      }
+    }
+    apiJson("/api/messages", {
+      method: "POST",
+      auth: true,
+      body: JSON.stringify({ recipient_id: profileId, body: text, attachment_path: attachmentPath }),
+    }).catch(() => {});
+  }
 }
 
 async function addFamily() {
@@ -2894,8 +3358,63 @@ document.addEventListener("click", async (event) => {
   const action = button.dataset.action;
   const id = button.dataset.id;
 
+  // Landing / auth navigation shortcuts
+  if (action === "go-signup") {
+    state.view = "auth";
+    state.authTab = "signup";
+    saveState();
+    render();
+    return;
+  }
+  if (action === "go-login") {
+    state.view = "auth";
+    state.authTab = "login";
+    saveState();
+    render();
+    return;
+  }
+  if (action === "go-landing") {
+    state.guestMode = false;
+    state.view = "landing";
+    saveState();
+    render();
+    return;
+  }
+  if (action === "guest-mode") {
+    state.guestMode = true;
+    state.view = "dashboard";
+    toast("Exploring as guest. Sign up to unlock all features.");
+    saveState();
+    render();
+    return;
+  }
+  if (action === "auth-tab-login") {
+    state.authTab = "login";
+    render();
+    return;
+  }
+  if (action === "auth-tab-signup") {
+    state.authTab = "signup";
+    render();
+    return;
+  }
+  if (action === "auth-logout") {
+    authAccessToken = "";
+    state.auth.session = null;
+    state.guestMode = false;
+    state.view = "landing";
+    toast("Signed out successfully.");
+    saveState();
+    render();
+    return;
+  }
+
   if (view) {
     state.view = view;
+    // If navigating away from landing/auth into the app, treat as guest mode
+    if (!isSignedIn() && !["auth", "landing"].includes(view)) {
+      state.guestMode = true;
+    }
     saveState();
     render();
     return;
@@ -3218,6 +3737,21 @@ window.addEventListener("appinstalled", () => {
 
 window.addEventListener("load", registerPwa);
 
+// Determine initial view
+if (!state.auth.session?.signedIn && !state.guestMode) {
+  // Fresh or logged-out user → show landing
+  state.view = "landing";
+} else if (state.view === "landing" || state.view === "auth") {
+  // Signed-in user re-opening the app → go to dashboard
+  state.view = "dashboard";
+}
+
 render();
-refreshLaunchStatus(false);
-refreshLiveProfiles(false);
+
+// Silently refresh live profiles in background (non-blocking, no failure toast)
+if (isSignedIn()) {
+  refreshSignedInData(false);
+} else {
+  // Just try to load profiles quietly — demo profiles show as fallback
+  refreshLiveProfiles(false);
+}
