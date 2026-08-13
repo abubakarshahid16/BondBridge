@@ -340,6 +340,8 @@ function createInitialState() {
       tone: "Warm and confident",
       context: "",
       suggestions: [],
+      loading: false,
+      source: "",
     },
   };
 }
@@ -369,7 +371,8 @@ function loadState() {
         },
       },
       filters: { ...defaults.filters, ...(saved.filters || {}) },
-      coach: { ...defaults.coach, ...(saved.coach || {}) },
+      // loading is always reset — a saved "true" would freeze the button forever
+      coach: { ...defaults.coach, ...(saved.coach || {}), loading: false },
       launch: { ...defaults.launch, ...(saved.launch || {}) },
       live: { ...defaults.live, ...(saved.live || {}) },
       auth: { ...defaults.auth, ...(saved.auth || {}) },
@@ -1834,26 +1837,36 @@ function renderCoach() {
           <span>Context</span>
           <textarea class="textarea" id="coach-context">${escapeHtml(state.coach.context)}</textarea>
         </label>
-        <button class="button primary large" data-action="generate-coach" title="Generate suggestions">${icon("sparkles")}Generate suggestions</button>
+        <button class="button primary large" data-action="generate-coach" title="Generate suggestions" ${state.coach.loading ? "disabled" : ""}>
+          ${icon("sparkles")}${state.coach.loading ? "Thinking…" : "Generate suggestions"}
+        </button>
       </article>
 
       <article class="draft-feed">
         <p class="eyebrow">Suggestions</p>
-        <h2 class="section-title">Respectful drafts</h2>
+        <h2 class="section-title">
+          Respectful drafts
+          ${state.coach.source === "ai" && !state.coach.loading ? `<span class="badge green" style="margin-left:8px">${icon("sparkles", true)}AI</span>` : ""}
+        </h2>
         <div class="draft-list">
           ${
-            state.coach.suggestions.length
-              ? state.coach.suggestions
-                  .map(
-                    (suggestion, index) => `
-                      <div class="draft-card">
-                        <p>${escapeHtml(suggestion)}</p>
-                        <button class="button" data-action="copy-suggestion" data-index="${index}" title="Copy suggestion">${icon("check")}Copy</button>
-                      </div>
-                    `,
-                  )
-                  .join("")
-              : `<div class="empty">Generate suggestions to get polished messages for real relationships.</div>`
+            state.coach.loading
+              ? `<div class="draft-card coach-thinking">
+                   <span class="coach-dots"><i></i><i></i><i></i></span>
+                   <p class="text-muted">Coach is writing three options for you…</p>
+                 </div>`
+              : state.coach.suggestions.length
+                ? state.coach.suggestions
+                    .map(
+                      (suggestion, index) => `
+                        <div class="draft-card">
+                          <p>${escapeHtml(suggestion)}</p>
+                          <button class="button" data-action="copy-suggestion" data-index="${index}" title="Copy suggestion">${icon("check")}Copy</button>
+                        </div>
+                      `,
+                    )
+                    .join("")
+                : `<div class="empty">Generate suggestions to get polished messages for real relationships.</div>`
           }
         </div>
       </article>
@@ -2628,12 +2641,74 @@ function respectfulRewrite(text) {
   return `Hi, I wanted to say this respectfully: ${clean.replace(/[!]{2,}/g, ".")} I would appreciate your thoughts whenever you are comfortable.`;
 }
 
-function generateSuggestions() {
+async function generateSuggestions() {
   const relation = getValue("coach-relation") || state.coach.relation;
   const goal = getValue("coach-goal") || state.coach.goal;
   const tone = getValue("coach-tone") || state.coach.tone;
   const context = getValue("coach-context") || state.coach.context;
-  state.coach = { relation, goal, tone, context, suggestions: buildSuggestions(relation, goal, tone, context) };
+
+  state.coach = { ...state.coach, relation, goal, tone, context, loading: true };
+  render();
+
+  const aiSuggestions = await askCoachAI({ relation, goal, tone, context });
+  const usedAI = aiSuggestions.length > 0;
+
+  state.coach = {
+    relation,
+    goal,
+    tone,
+    context,
+    loading: false,
+    source: usedAI ? "ai" : "offline",
+    suggestions: usedAI ? aiSuggestions : buildSuggestions(relation, goal, tone, context),
+  };
+  saveState();
+  render();
+  toast(usedAI ? "Coach wrote you 3 options." : "Suggestions ready.");
+}
+
+// Calls the Supabase Edge Function, which holds the AI key server-side.
+// Falls back to built-in templates if the coach is unreachable.
+async function askCoachAI({ relation, goal, tone, context }) {
+  const url = window.BONDBRIDGE_AI_URL || "";
+  const key = window.BONDBRIDGE_SUPABASE_KEY || "";
+  if (!url || !key) return [];
+
+  const prompt = [
+    "Write 3 short message options I could actually send.",
+    `Relationship: ${relation}`,
+    `Goal: ${goal}`,
+    `Tone: ${tone}`,
+    context ? `Extra context: ${context}` : "",
+    "Return ONLY the 3 messages, numbered 1. 2. 3., each on its own line. No preamble, no explanation.",
+  ].filter(Boolean).join("\n");
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20000);
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${key}`,
+        apikey: key,
+      },
+      body: JSON.stringify({ prompt, context: context || "" }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!response.ok) return [];
+    const data = await response.json();
+    if (!data?.ok || !data.reply) return [];
+
+    return String(data.reply)
+      .split("\n")
+      .map((line) => line.replace(/^\s*\d+[.)]\s*/, "").replace(/^["“]|["”]$/g, "").trim())
+      .filter((line) => line.length > 15)
+      .slice(0, 3);
+  } catch {
+    return [];
+  }
 }
 
 function buildSuggestions(relation, goal, tone, context) {
@@ -3074,36 +3149,466 @@ function exportData() {
   toast("Local data exported.");
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  SUPABASE BACKEND
+//  The app used to call /api/* on a Node server. On static hosting there is
+//  no server, so every call failed. These functions talk to Supabase directly
+//  from the browser — Row Level Security enforces permissions in the database.
+// ═══════════════════════════════════════════════════════════════════════════
+
+let supabaseClient = null;
+
+function getSupabase() {
+  if (supabaseClient) return supabaseClient;
+  const url = window.BONDBRIDGE_SUPABASE_URL || "";
+  const key = window.BONDBRIDGE_SUPABASE_KEY || "";
+  if (!url || !key || !window.supabase || typeof window.supabase.createClient !== "function") return null;
+  supabaseClient = window.supabase.createClient(url, key, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: false,
+      storageKey: "bondbridge-auth",
+    },
+    realtime: { params: { eventsPerSecond: 10 } },
+  });
+  return supabaseClient;
+}
+
+function backendReady() {
+  return Boolean(getSupabase());
+}
+
+async function currentAuthUser(client) {
+  const { data } = await client.auth.getUser();
+  return data?.user || null;
+}
+
+// Keeps the same { ok, status, payload } shape the whole app already expects,
+// so every existing call site keeps working.
 async function apiJson(path, options = {}) {
-  try {
-    const headers = {
-      "content-type": "application/json",
-      ...(options.auth && authAccessToken ? { authorization: `Bearer ${authAccessToken}` } : {}),
-      ...(options.headers || {}),
+  const client = getSupabase();
+  if (!client) {
+    return {
+      ok: false,
+      status: 0,
+      payload: { ok: false, message: "Can't reach BondBridge servers. Check your internet connection." },
     };
-    const fetchOptions = { ...options };
-    delete fetchOptions.auth;
-    const response = await fetch(apiEndpoint(path), {
-      ...fetchOptions,
-      headers,
-    });
-    const text = await response.text();
-    let payload = null;
-    try {
-      payload = text ? JSON.parse(text) : null;
-    } catch {
-      payload = { raw: text.slice(0, 500) };
-    }
-    return { ok: response.ok && (!payload || payload.ok !== false), status: response.status, payload };
+  }
+  let body = {};
+  if (options.body) {
+    try { body = JSON.parse(options.body); } catch { body = {}; }
+  }
+  const method = String(options.method || "GET").toUpperCase();
+  try {
+    const payload = await supabaseRoute(client, path, method, body);
+    if (payload && payload.ok === false) return { ok: false, status: 400, payload };
+    return { ok: true, status: 200, payload: payload || { ok: true } };
   } catch (error) {
-    return { ok: false, status: 0, payload: { error: error.message } };
+    return { ok: false, status: 0, payload: { ok: false, message: error?.message || "Something went wrong." } };
   }
 }
 
-function apiEndpoint(path) {
-  const base = window.BONDBRIDGE_API_BASE || "";
-  if (!base || /^https?:\/\//i.test(path)) return path;
-  return `${base.replace(/\/$/, "")}${path.startsWith("/") ? path : `/${path}`}`;
+async function supabaseRoute(client, rawPath, method, body) {
+  const [pathname, queryString = ""] = String(rawPath).split("?");
+  const params = new URLSearchParams(queryString);
+
+  switch (`${method} ${pathname}`) {
+    case "POST /api/auth/signup":          return sbSignup(client, body);
+    case "POST /api/auth/login":           return sbLogin(client, body);
+    case "GET /api/status":                return sbStatus(client);
+    case "GET /api/profiles":              return sbListProfiles(client);
+    case "GET /api/me":                    return sbGetMe(client);
+    case "POST /api/profiles/me":          return sbSaveProfile(client, body);
+    case "GET /api/connections":           return sbListConnections(client);
+    case "POST /api/connections/request":  return sbRequestConnection(client, body);
+    case "POST /api/connections/respond":  return sbRespondConnection(client, body);
+    case "GET /api/messages":              return sbListMessages(client, params.get("recipient_id"));
+    case "POST /api/messages":             return sbSendMessageRow(client, body);
+    case "GET /api/family-reminders":      return sbListFamily(client);
+    case "POST /api/family-reminders":     return sbAddFamily(client, body);
+    case "POST /api/family-reminders/contacted": return sbFamilyContacted(client, body);
+    case "GET /api/reports":               return sbListReports(client);
+    case "POST /api/reports":              return sbAddReport(client, body);
+    case "POST /api/proof":                return sbAddProof(client, body);
+    case "POST /api/storage/upload":       return sbUploadFile(client, body);
+    case "POST /api/video/room":           return sbCreateVideoRoom(client, body);
+    case "POST /api/moderate":
+      return { ok: true, allowed: !hasAbuse(body.text || ""), provider: "on-device" };
+    case "POST /api/identity/session":
+      return { ok: true, provider: "supabase", message: "Proof review is handled inside the app." };
+    case "POST /api/checkout":
+      return { ok: true, provider: "free", paid_api: false, message: "BondBridge is free." };
+    default:
+      return { ok: false, message: "That feature isn't available yet." };
+  }
+}
+
+// ─── Auth ────────────────────────────────────────────────────────────────────
+
+async function sbSignup(client, body) {
+  const { data, error } = await client.auth.signUp({
+    email: String(body.email || "").trim(),
+    password: body.password,
+    options: {
+      data: {
+        full_name: body.name,
+        gender: body.gender,
+        age: body.age,
+        country: body.country,
+        role: body.role,
+        field: body.field,
+        organization: body.organization,
+        languages: Array.isArray(body.languages) ? body.languages : ["English"],
+        purposes: Array.isArray(body.purposes) ? body.purposes : ["Friendship"],
+        bio: body.bio || "",
+      },
+    },
+  });
+  if (error) return { ok: false, message: friendlyAuthError(error.message) };
+
+  if (data.session) authAccessToken = data.session.access_token;
+  if (data.user) state.currentUser.id = data.user.id;
+
+  return {
+    ok: true,
+    user: data.user ? { id: data.user.id, email: data.user.email } : null,
+    session: data.session
+      ? { access_token: data.session.access_token, expires_at: data.session.expires_at }
+      : null,
+    needs_email_confirmation: !data.session,
+  };
+}
+
+async function sbLogin(client, body) {
+  const { data, error } = await client.auth.signInWithPassword({
+    email: String(body.email || "").trim(),
+    password: body.password,
+  });
+  if (error) return { ok: false, message: friendlyAuthError(error.message) };
+
+  if (data.session) authAccessToken = data.session.access_token;
+  if (data.user) state.currentUser.id = data.user.id;
+
+  return {
+    ok: true,
+    user: { id: data.user.id, email: data.user.email },
+    session: { access_token: data.session.access_token, expires_at: data.session.expires_at },
+  };
+}
+
+function friendlyAuthError(message = "") {
+  const text = message.toLowerCase();
+  if (text.includes("already registered") || text.includes("already been registered")) {
+    return "An account with this email already exists.";
+  }
+  if (text.includes("invalid login") || text.includes("invalid credentials")) {
+    return "Incorrect email or password.";
+  }
+  if (text.includes("email not confirmed")) {
+    return "Please confirm your email first — check your inbox.";
+  }
+  if (text.includes("password")) return "Password must be at least 8 characters.";
+  if (text.includes("rate limit")) return "Too many attempts. Wait a minute and try again.";
+  return message || "Something went wrong. Please try again.";
+}
+
+async function sbStatus(client) {
+  const { error } = await client.from("profiles").select("id", { count: "exact", head: true });
+  return {
+    ok: !error,
+    mode: "supabase",
+    message: error ? error.message : "Connected.",
+    services: launchProviders.map((item) => ({ ...item, ready: !error })),
+  };
+}
+
+// ─── Profiles ────────────────────────────────────────────────────────────────
+
+async function sbListProfiles(client) {
+  const { data, error } = await client
+    .from("profiles")
+    .select("*")
+    .eq("is_suspended", false)
+    .order("created_at", { ascending: false })
+    .limit(200);
+  if (error) return { ok: false, message: error.message };
+  const myId = state.currentUser.id;
+  return { ok: true, profiles: (data || []).filter((row) => row.id !== myId) };
+}
+
+async function sbGetMe(client) {
+  const user = await currentAuthUser(client);
+  if (!user) return { ok: false, message: "You're signed out." };
+  const { data, error } = await client.from("profiles").select("*").eq("id", user.id).maybeSingle();
+  if (error) return { ok: false, message: error.message };
+  return { ok: true, profile: data, user: { id: user.id, email: user.email } };
+}
+
+async function sbSaveProfile(client, body) {
+  const user = await currentAuthUser(client);
+  if (!user) return { ok: false, message: "You're signed out." };
+
+  const age = Math.min(90, Math.max(18, Number(body.age) || 18));
+  const row = {
+    id: user.id,
+    full_name: String(body.full_name || "").trim() || "BondBridge member",
+    gender: ["Male", "Female"].includes(body.gender) ? body.gender : "Male",
+    age,
+    country: String(body.country || "").trim() || "Not set",
+    city: body.city || null,
+    role: ["Student", "Professional"].includes(body.role) ? body.role : "Student",
+    field: String(body.field || "").trim() || "Not set",
+    organization: String(body.organization || "").trim() || "Not set",
+    languages: Array.isArray(body.languages) && body.languages.length ? body.languages : ["English"],
+    purposes: Array.isArray(body.purposes) && body.purposes.length ? body.purposes : ["Friendship"],
+    bio: body.bio || "",
+    updated_at: new Date().toISOString(),
+  };
+  if (body.profile_photo_url) row.profile_photo_url = body.profile_photo_url;
+
+  const { data, error } = await client.from("profiles").upsert(row).select().maybeSingle();
+  if (error) return { ok: false, message: error.message };
+  return { ok: true, profile: data };
+}
+
+// ─── Connections ─────────────────────────────────────────────────────────────
+
+async function sbListConnections(client) {
+  const user = await currentAuthUser(client);
+  if (!user) return { ok: false, message: "You're signed out." };
+  const { data, error } = await client
+    .from("connections")
+    .select("*")
+    .or(`requester_id.eq.${user.id},recipient_id.eq.${user.id}`)
+    .order("created_at", { ascending: false });
+  if (error) return { ok: false, message: error.message };
+  return { ok: true, connections: data || [] };
+}
+
+async function sbRequestConnection(client, body) {
+  const user = await currentAuthUser(client);
+  if (!user) return { ok: false, message: "You're signed out." };
+  if (!body.recipient_id) return { ok: false, message: "No person selected." };
+  if (body.recipient_id === user.id) return { ok: false, message: "You can't connect with yourself." };
+
+  const { data, error } = await client
+    .from("connections")
+    .insert({
+      requester_id: user.id,
+      recipient_id: body.recipient_id,
+      note: body.note || "",
+      status: "pending",
+    })
+    .select()
+    .maybeSingle();
+
+  if (error) {
+    if (error.code === "23505") return { ok: false, message: "You already have a request with this person." };
+    if (error.code === "23503") return { ok: false, message: "That person is no longer available." };
+    return { ok: false, message: error.message };
+  }
+  return { ok: true, connection: data };
+}
+
+async function sbRespondConnection(client, body) {
+  const user = await currentAuthUser(client);
+  if (!user) return { ok: false, message: "You're signed out." };
+  const status = ["accepted", "declined", "blocked"].includes(body.status) ? body.status : "accepted";
+  const { data, error } = await client
+    .from("connections")
+    .update({ status, updated_at: new Date().toISOString() })
+    .eq("id", body.connection_id)
+    .select()
+    .maybeSingle();
+  if (error) return { ok: false, message: error.message };
+  return { ok: true, connection: data };
+}
+
+// Finds the connection between me and another user (either direction)
+async function sbFindConnection(client, otherUserId) {
+  const user = await currentAuthUser(client);
+  if (!user || !otherUserId) return null;
+  const { data } = await client
+    .from("connections")
+    .select("id,status,requester_id,recipient_id")
+    .or(
+      `and(requester_id.eq.${user.id},recipient_id.eq.${otherUserId}),` +
+      `and(requester_id.eq.${otherUserId},recipient_id.eq.${user.id})`,
+    )
+    .limit(1)
+    .maybeSingle();
+  return data || null;
+}
+
+// ─── Messages ────────────────────────────────────────────────────────────────
+
+async function sbListMessages(client, otherUserId) {
+  if (!otherUserId) return { ok: true, messages: [] };
+  const connection = await sbFindConnection(client, otherUserId);
+  if (!connection) return { ok: true, messages: [] };
+  const { data, error } = await client
+    .from("messages")
+    .select("*")
+    .eq("connection_id", connection.id)
+    .order("created_at", { ascending: true })
+    .limit(500);
+  if (error) return { ok: false, message: error.message };
+  return { ok: true, messages: data || [], connection_id: connection.id };
+}
+
+async function sbSendMessageRow(client, body) {
+  const user = await currentAuthUser(client);
+  if (!user) return { ok: false, message: "You're signed out." };
+  const connection = await sbFindConnection(client, body.recipient_id);
+  if (!connection) return { ok: false, message: "Send a connection request first." };
+  if (connection.status !== "accepted") {
+    return { ok: false, message: "You can chat once your request is accepted." };
+  }
+  const { data, error } = await client
+    .from("messages")
+    .insert({
+      connection_id: connection.id,
+      sender_id: user.id,
+      body: body.body || "",
+      attachment_url: body.attachment_path || null,
+    })
+    .select()
+    .maybeSingle();
+  if (error) return { ok: false, message: error.message };
+  return { ok: true, message: data };
+}
+
+// ─── Family reminders ────────────────────────────────────────────────────────
+
+async function sbListFamily(client) {
+  const user = await currentAuthUser(client);
+  if (!user) return { ok: false, message: "You're signed out." };
+  const { data, error } = await client
+    .from("family_reminders")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false });
+  if (error) return { ok: false, message: error.message };
+  return { ok: true, reminders: data || [] };
+}
+
+async function sbAddFamily(client, body) {
+  const user = await currentAuthUser(client);
+  if (!user) return { ok: false, message: "You're signed out." };
+  const { data, error } = await client
+    .from("family_reminders")
+    .insert({
+      user_id: user.id,
+      name: body.name,
+      relationship: body.relationship || "Friend",
+      cadence_days: Math.min(365, Math.max(1, Number(body.cadence_days) || 7)),
+      notes: body.notes || "",
+    })
+    .select()
+    .maybeSingle();
+  if (error) return { ok: false, message: error.message };
+  return { ok: true, reminder: data };
+}
+
+async function sbFamilyContacted(client, body) {
+  const user = await currentAuthUser(client);
+  if (!user) return { ok: false, message: "You're signed out." };
+  const { data, error } = await client
+    .from("family_reminders")
+    .update({ last_contact_at: new Date().toISOString().slice(0, 10) })
+    .eq("id", body.id)
+    .eq("user_id", user.id)
+    .select()
+    .maybeSingle();
+  if (error) return { ok: false, message: error.message };
+  return { ok: true, reminder: data };
+}
+
+// ─── Reports ─────────────────────────────────────────────────────────────────
+
+async function sbListReports(client) {
+  const user = await currentAuthUser(client);
+  if (!user) return { ok: false, message: "You're signed out." };
+  const { data, error } = await client
+    .from("reports")
+    .select("*")
+    .eq("reporter_id", user.id)
+    .order("created_at", { ascending: false });
+  if (error) return { ok: false, message: error.message };
+  return { ok: true, reports: data || [] };
+}
+
+async function sbAddReport(client, body) {
+  const user = await currentAuthUser(client);
+  if (!user) return { ok: false, message: "You're signed out." };
+  const { data, error } = await client
+    .from("reports")
+    .insert({
+      reporter_id: user.id,
+      reported_user_id: body.reported_user_id || null,
+      reason: body.reason || "Reported for review.",
+    })
+    .select()
+    .maybeSingle();
+  if (error) return { ok: false, message: error.message };
+  return { ok: true, report: data };
+}
+
+async function sbAddProof(client, body) {
+  const user = await currentAuthUser(client);
+  if (!user) return { ok: false, message: "You're signed out." };
+  const { data, error } = await client
+    .from("verification_documents")
+    .insert({
+      user_id: user.id,
+      document_type: body.document_type || "proof",
+      storage_path: body.storage_path || "",
+      reviewer_note: body.note || null,
+    })
+    .select()
+    .maybeSingle();
+  if (error) return { ok: false, message: error.message };
+  await client.from("profiles").update({ role_status: "pending" }).eq("id", user.id);
+  return { ok: true, document: data };
+}
+
+// ─── Storage ─────────────────────────────────────────────────────────────────
+
+async function sbUploadFile(client, body) {
+  const user = await currentAuthUser(client);
+  if (!user) return { ok: false, message: "You're signed out." };
+  const bucket = body.bucket || "bondbridge-chat";
+  const response = await fetch(body.dataUrl);
+  const blob = await response.blob();
+  const extension = (String(body.fileName || "file").split(".").pop() || "bin").toLowerCase().slice(0, 8);
+  const objectPath = `${user.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extension}`;
+
+  const { error } = await client.storage.from(bucket).upload(objectPath, blob, {
+    contentType: body.contentType || blob.type || "application/octet-stream",
+    upsert: false,
+  });
+  if (error) return { ok: false, message: error.message };
+
+  let publicUrl = "";
+  if (bucket === "bondbridge-avatars") {
+    publicUrl = client.storage.from(bucket).getPublicUrl(objectPath).data?.publicUrl || "";
+  }
+  return { ok: true, path: objectPath, public_url: publicUrl, bucket };
+}
+
+// ─── Video rooms ─────────────────────────────────────────────────────────────
+
+async function sbCreateVideoRoom(client, body) {
+  const user = await currentAuthUser(client);
+  if (!user) return { ok: false, message: "Sign in to start a video call." };
+  const { data, error } = await client
+    .from("webrtc_rooms")
+    .insert({ host_user_id: user.id, purpose: body.purpose || "verified-intro" })
+    .select()
+    .maybeSingle();
+  if (error) return { ok: false, message: error.message };
+  return { ok: true, room: data, room_code: data?.room_code || "" };
 }
 
 function setLaunchResult(title, message, payload) {
@@ -3579,10 +4084,23 @@ document.addEventListener("click", async (event) => {
     return;
   }
   if (action === "auth-logout") {
+    stopRealtime();
+    const client = getSupabase();
+    if (client) {
+      try { await client.auth.signOut(); } catch { /* sign out locally anyway */ }
+    }
     authAccessToken = "";
     state.auth.session = null;
     state.guestMode = false;
     state.view = "landing";
+    // Clear synced data so the next person on this device starts clean
+    state.chats = {};
+    state.requests = [];
+    state.connections = [];
+    state.connectionRows = [];
+    state.profiles = [];
+    state.reports = [];
+    state.selectedChat = "";
     toast("Signed out successfully.");
     saveState();
     render();
@@ -3753,8 +4271,7 @@ document.addEventListener("click", async (event) => {
   if (action === "family-message") familyMessage(id);
 
   if (action === "generate-coach") {
-    generateSuggestions();
-    toast("Suggestions generated.");
+    await generateSuggestions();
   }
 
   if (action === "copy-suggestion") {
@@ -3922,21 +4439,138 @@ window.addEventListener("appinstalled", () => {
 
 window.addEventListener("load", registerPwa);
 
-// Determine initial view
-if (!state.auth.session?.signedIn && !state.guestMode) {
-  // Fresh or logged-out user → show landing
-  state.view = "landing";
-} else if (state.view === "landing" || state.view === "auth") {
-  // Signed-in user re-opening the app → go to dashboard
-  state.view = "dashboard";
+// ═══════════════════════════════════════════════════════════════════════════
+//  REALTIME — makes chat appear instantly on both devices
+// ═══════════════════════════════════════════════════════════════════════════
+
+let realtimeChannel = null;
+
+function startRealtime() {
+  const client = getSupabase();
+  if (!client || realtimeChannel || !isSignedIn()) return;
+
+  realtimeChannel = client
+    .channel("bondbridge-live")
+    // New message arrives → show it immediately
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, (payload) => {
+      handleIncomingMessage(payload.new).catch(() => {});
+    })
+    // Someone sent/accepted a request → refresh the lists
+    .on("postgres_changes", { event: "*", schema: "public", table: "connections" }, () => {
+      handleConnectionChange().catch(() => {});
+    })
+    .subscribe();
 }
 
-render();
-
-// Silently refresh live profiles in background (non-blocking, no failure toast)
-if (isSignedIn()) {
-  refreshSignedInData(false);
-} else {
-  // Just try to load profiles quietly — demo profiles show as fallback
-  refreshLiveProfiles(false);
+function stopRealtime() {
+  const client = getSupabase();
+  if (client && realtimeChannel) {
+    try { client.removeChannel(realtimeChannel); } catch { /* ignore */ }
+  }
+  realtimeChannel = null;
 }
+
+async function handleIncomingMessage(row) {
+  if (!row || !row.connection_id) return;
+  // Our own messages are already on screen — don't duplicate them
+  if (row.sender_id === state.currentUser.id) return;
+
+  let connection = state.connectionRows.find((item) => item.id === row.connection_id);
+  if (!connection) {
+    await refreshConnections(false);
+    connection = state.connectionRows.find((item) => item.id === row.connection_id);
+  }
+  const profileId = connection ? otherUserIdForConnection(connection) : "";
+  if (!profileId) return;
+
+  if (!state.chats[profileId]) state.chats[profileId] = [];
+  if (state.chats[profileId].some((message) => message.id === row.id)) return;
+
+  state.chats[profileId].push({
+    id: row.id,
+    from: "them",
+    text: row.body || "",
+    attachment: null,
+    time: row.created_at
+      ? new Date(row.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      : nowTime(),
+    profileId,
+  });
+  saveState();
+
+  const isViewingThisChat = state.view === "chat" && state.selectedChat === profileId;
+  if (!isViewingThisChat) {
+    const profile = profileById(profileId);
+    const who = profile?.name ? profile.name.split(" ")[0] : "someone";
+    toast(`New message from ${who}`);
+  }
+  render();
+}
+
+async function handleConnectionChange() {
+  const beforePending = state.requests.filter((item) => item.direction === "incoming").length;
+  await refreshConnections(false);
+  const afterPending = state.requests.filter((item) => item.direction === "incoming").length;
+  if (afterPending > beforePending) toast("You have a new connection request.");
+  render();
+}
+
+// Restores an existing Supabase login so a page refresh keeps you signed in
+async function restoreSupabaseSession() {
+  const client = getSupabase();
+  if (!client) return false;
+  try {
+    const { data } = await client.auth.getSession();
+    const session = data?.session;
+    if (!session?.access_token || !session.user) return false;
+    authAccessToken = session.access_token;
+    state.currentUser.id = session.user.id;
+    state.auth.email = session.user.email || state.auth.email;
+    state.auth.session = {
+      email: session.user.email || "",
+      provider: "supabase",
+      signedIn: true,
+      expiresAt: session.expires_at || "",
+    };
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  BOOT
+// ═══════════════════════════════════════════════════════════════════════════
+
+(async function boot() {
+  const restored = await restoreSupabaseSession();
+  if (!restored) {
+    // Stale local flag but no real session — treat as signed out
+    authAccessToken = "";
+    if (state.auth.session) state.auth.session.signedIn = false;
+  }
+
+  if (!isSignedIn() && !state.guestMode) {
+    state.view = "landing";
+  } else if (state.view === "landing" || state.view === "auth") {
+    state.view = "dashboard";
+  }
+
+  render();
+
+  if (isSignedIn()) {
+    startRealtime();
+    refreshSignedInData(false);
+  } else {
+    refreshLiveProfiles(false);
+  }
+
+  // Keep realtime alive after the auth state changes
+  const client = getSupabase();
+  if (client) {
+    client.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_OUT") stopRealtime();
+      if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") startRealtime();
+    });
+  }
+})();

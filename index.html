@@ -21,6 +21,17 @@
   <body>
     <div id="app" class="app-shell"></div>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <!-- Supabase config. The publishable key is safe in public code —
+         Row Level Security is what actually protects the data. -->
+    <script>
+      window.BONDBRIDGE_SUPABASE_URL = "https://fpbodwjgypxzqpstwcvo.supabase.co";
+      window.BONDBRIDGE_SUPABASE_KEY = "sb_publishable_nLwhMDYKDfAY_OP-o3c-iA_LJtQ2Ai_";
+      window.BONDBRIDGE_AI_URL = "https://fpbodwjgypxzqpstwcvo.supabase.co/functions/v1/coach";
+    </script>
+    <!-- Bundled locally rather than loaded from a CDN, so the app still works
+         if the CDN is blocked, slow, or down. -->
+    <script src="./supabase-lib.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

@@ -3,23 +3,24 @@ import path from "node:path";
 
 const root = process.cwd();
 const output = path.join(root, "dist", "github-pages");
-const productionUrl = "https://bondbridge-verified-20260813.tabisharshad51.chatgpt.site";
+// Bump this on every deploy so returning users get fresh code instead of a
+// stale service-worker cache.
+const buildId = `v${Math.floor(Date.now() / 1000)}`;
 
-const [html, css, js] = await Promise.all([
+const [html, css, js, supabaseLib] = await Promise.all([
   readFile(path.join(root, "index.html"), "utf8"),
   readFile(path.join(root, "styles.css"), "utf8"),
   readFile(path.join(root, "app.js"), "utf8"),
+  readFile(path.join(root, "supabase-lib.js"), "utf8"),
 ]);
 
 const page = html
   .replace('href="/manifest"', 'href="./manifest.webmanifest"')
   .replace('href="/app-icon"', 'href="./icon.svg"')
   .replace('href="/app-icon"', 'href="./icon.svg"')
-  .replace('<link rel="stylesheet" href="./styles.css" />', '<link rel="stylesheet" href="./styles.css" />')
-  .replace(
-    '<script src="./app.js"></script>',
-    `<script>window.BONDBRIDGE_API_BASE = ${JSON.stringify(productionUrl)};</script>\n    <script src="./app.js"></script>`,
-  );
+  .replace('<link rel="stylesheet" href="./styles.css" />', `<link rel="stylesheet" href="./styles.css?${buildId}" />`)
+  // Supabase config already lives in index.html; just cache-bust the app bundle
+  .replace('<script src="./app.js"></script>', `<script src="./app.js?${buildId}"></script>`);
 
 const pagesJs = js.replace('navigator.serviceWorker.register("/service-worker")', 'navigator.serviceWorker.register("./sw.js")');
 
@@ -77,8 +78,8 @@ const icon = `
 `.trim();
 
 const serviceWorker = `
-const CACHE_NAME = "bondbridge-github-pages-v1";
-const APP_SHELL = ["./", "./styles.css", "./app.js", "./manifest.webmanifest", "./icon.svg"];
+const CACHE_NAME = "bondbridge-${buildId}";
+const APP_SHELL = ["./", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -114,6 +115,7 @@ await Promise.all([
   writeFile(path.join(output, "index.html"), page),
   writeFile(path.join(output, "styles.css"), css),
   writeFile(path.join(output, "app.js"), pagesJs),
+  writeFile(path.join(output, "supabase-lib.js"), supabaseLib),
   writeFile(path.join(output, "manifest.webmanifest"), JSON.stringify(manifest, null, 2)),
   writeFile(path.join(output, "icon.svg"), icon),
   writeFile(path.join(output, "sw.js"), serviceWorker),
