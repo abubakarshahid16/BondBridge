@@ -2672,7 +2672,10 @@ async function generateSuggestions() {
 async function askCoachAI({ relation, goal, tone, context }) {
   const url = window.BONDBRIDGE_AI_URL || "";
   const key = window.BONDBRIDGE_SUPABASE_KEY || "";
-  if (!url || !key) return [];
+  // The Edge Function verifies a JWT. A signed-in user's access token is one;
+  // the publishable key is not. Guests fall back to the built-in templates.
+  const token = authAccessToken || "";
+  if (!url || !key || !token) return [];
 
   const prompt = [
     "Write 3 short message options I could actually send.",
@@ -2690,7 +2693,7 @@ async function askCoachAI({ relation, goal, tone, context }) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${key}`,
+        Authorization: `Bearer ${token}`,
         apikey: key,
       },
       body: JSON.stringify({ prompt, context: context || "" }),
