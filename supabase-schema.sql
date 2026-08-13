@@ -146,20 +146,35 @@ create index webrtc_signals_room_id_created_at_idx on public.webrtc_signals (roo
 create index webrtc_signals_sender_id_idx on public.webrtc_signals (sender_id);
 create index webrtc_signals_recipient_id_idx on public.webrtc_signals (recipient_id);
 
-create policy "Public can read verified active profiles"
+create policy "Read verified profiles or own profile"
 on public.profiles for select
+to public
 using (
-  not is_suspended
-  and identity_status = 'verified'
-  and role_status = 'verified'
-  and gender_status = 'verified'
-  and uniqueness_status = 'verified'
+  (
+    not is_suspended
+    and identity_status = 'verified'
+    and role_status = 'verified'
+    and gender_status = 'verified'
+    and uniqueness_status = 'verified'
+  )
+  or ((select auth.uid()) = id)
 );
 
-create policy "Users manage own profile"
-on public.profiles for all
-using (auth.uid() = id)
-with check (auth.uid() = id);
+create policy "Users insert own profile"
+on public.profiles for insert
+to authenticated
+with check ((select auth.uid()) = id);
+
+create policy "Users update own profile"
+on public.profiles for update
+to authenticated
+using ((select auth.uid()) = id)
+with check ((select auth.uid()) = id);
+
+create policy "Users delete own profile"
+on public.profiles for delete
+to authenticated
+using ((select auth.uid()) = id);
 
 create policy "Users manage own verification documents"
 on public.verification_documents for all
