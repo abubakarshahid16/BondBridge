@@ -3626,6 +3626,45 @@ html[data-theme="dark"] .auth-form-card { background: #0a0a0a; border-color: #22
   text-align: center;
 }
 
+/* Auth form header (logo + title inside card) */
+.auth-form-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+.auth-form-header h2 { font-size: 1.5rem; font-weight: 800; margin: 0; }
+.auth-form-header p { margin: 0; }
+.auth-logo {
+  width: 52px;
+  height: 52px;
+  background: var(--grad);
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+.auth-logo .icon { width: 26px; height: 26px; }
+
+/* Two-column row inside auth form */
+.auth-field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+@media (max-width: 360px) { .auth-field-row { grid-template-columns: 1fr; } }
+
+/* Legal micro-copy */
+.auth-legal {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.5;
+}
+
 .link-button {
   background: none;
   border: none;
@@ -3699,6 +3738,66 @@ html[data-theme="dark"] .auth-signed-in-card { background: #0a0a0a; border-color
 .welcome-inner h2 { margin: 0 0 4px; font-size: 1.2rem; }
 .welcome-inner p { margin: 0; color: var(--muted); font-size: 0.9rem; }
 
+/* ─── Verify welcome banner ─────────────────────────────────────────────────── */
+.verify-welcome-banner {
+  background: linear-gradient(135deg, rgba(var(--rose-rgb,220,53,69),0.08), rgba(var(--blue-rgb,59,130,246),0.06));
+  border: 1.5px solid var(--line);
+  border-radius: 16px;
+  padding: 20px 24px;
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 4px;
+}
+.verify-welcome-icon { font-size: 1.8rem; line-height: 1; flex-shrink: 0; }
+.verify-welcome-banner h3 { margin: 0 0 4px; font-size: 1.05rem; }
+.verify-welcome-banner p { margin: 0; color: var(--muted); font-size: 0.875rem; line-height: 1.5; }
+
+/* Onboarding dashboard card */
+.onboarding-card {
+  background: var(--paper);
+  border: 1.5px solid var(--line);
+  border-radius: 16px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+html[data-theme="dark"] .onboarding-card { background: #0a0a0a; border-color: #222; }
+.onboarding-card h3 { margin: 0; font-size: 1.15rem; }
+.onboarding-card p { margin: 0; color: var(--muted); font-size: 0.9rem; line-height: 1.5; }
+.onboarding-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.onboarding-step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s;
+}
+.onboarding-step:hover { border-color: var(--rose); }
+.onboarding-step-num {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: var(--grad);
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.onboarding-step-num.done { background: #16a34a; }
+.onboarding-step strong { display: block; font-size: 0.9rem; }
+.onboarding-step small { color: var(--muted); font-size: 0.8rem; }
+
 /* ─── Settings screen ───────────────────────────────────────────────────────── */
 .settings-screen { max-width: 680px; margin: 0 auto; }
 .settings-sections { display: flex; flex-direction: column; gap: 20px; }
@@ -3710,6 +3809,15 @@ html[data-theme="dark"] .auth-signed-in-card { background: #0a0a0a; border-color
 }
 html[data-theme="dark"] .settings-block { background: #0a0a0a; border-color: #222; }
 .settings-block h2 { margin: 4px 0 12px; }
+.settings-account-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 4px;
+}
+.settings-account-header > div { flex: 1; min-width: 0; }
+.settings-account-header h2 { margin: 0; font-size: 1.2rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.settings-account-header p { margin: 2px 0 0; font-size: 0.85rem; color: var(--muted); }
 
 /* ─── Sidebar user area ─────────────────────────────────────────────────────── */
 .sidebar-user {

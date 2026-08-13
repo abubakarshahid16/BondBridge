@@ -10,7 +10,7 @@ const views = [
   ["family", "Family", "heart"],
   ["coach", "Coach", "sparkles"],
   ["verify", "Verify", "shield"],
-  ["settings", "Settings", "database"],
+  ["settings", "Settings", "gear"],
 ];
 
 // Extra views that are accessible but not shown in the sidebar nav
@@ -49,6 +49,13 @@ const iconMap = {
   sparkles: '<path d="m12 3 1.6 4.8L18 10l-4.4 2.2L12 17l-1.6-4.8L6 10l4.4-2.2Z"/><path d="m19 15 .8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8Z"/><path d="m5 3 .7 1.8L8 5.5l-2.3.7L5 8l-.7-1.8L2 5.5l2.3-.7Z"/>',
   lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
   database: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>',
+  bell: '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>',
+  info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+  star: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
+  logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
+  arrow_right: '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
   check: '<path d="m20 6-11 11-5-5"/>',
   plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
   send: '<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
@@ -479,8 +486,9 @@ function isSignedIn() {
 function requireSignedIn(action) {
   if (isSignedIn()) return true;
   state.view = "auth";
-  state.authTab = "login";
-  toast(`Please sign in to ${action}.`);
+  // First-time guests should see signup; existing users coming back can use login
+  state.authTab = state.guestMode ? "signup" : "login";
+  toast(`Create a free account to ${action}.`);
   saveState();
   render();
   return false;
@@ -623,7 +631,7 @@ function renderSidebar() {
           <strong>${escapeHtml(displayName(user.name, "You"))}</strong>
           <small>${escapeHtml(user.role)} · ${trustCompletion()}% verified</small>
         </div>
-        <button class="nav-button-icon" data-view="settings" title="Settings">${icon("database", true)}</button>
+        <button class="nav-button-icon" data-view="settings" title="Settings">${icon("gear", true)}</button>
       </div>`
     : `<div class="sidebar-user">
         <button class="button gradient sidebar-signin-btn" data-view="auth">${icon("key")}Sign in</button>
@@ -708,16 +716,60 @@ function renderDashboard() {
   const topMatch = getFilteredProfiles()[0];
   const loungeProfile = getCurrentMeetProfile();
   const inDemoMode = isDemoMode();
+  const isNew = isSignedIn() && trustCompletion() === 0 && accepted === 0;
 
   return `
     <section class="insta-feed">
       ${!isSignedIn() ? renderWelcomeBanner() : ""}
+      ${isNew ? renderOnboardingCard() : ""}
       ${inDemoMode ? renderDemoBanner() : ""}
       ${renderInstaStories()}
       ${renderMeetPost(loungeProfile, topMatch)}
       ${renderFamilyPost(nextFamily, dueContacts.length)}
       ${renderSafetyPost(pendingRequests, accepted)}
     </section>
+  `;
+}
+
+function renderOnboardingCard() {
+  const profileDone = verifyStepComplete("profile");
+  const proofDone = verifyStepComplete("proof");
+  const hasFriend = state.connections.length > 0;
+  const firstName = displayName(state.currentUser.name, "").split(" ")[0] || "there";
+  return `
+    <article class="insta-post card pad onboarding-card">
+      <div>
+        <p class="eyebrow">Getting started</p>
+        <h3>Welcome, ${escapeHtml(firstName)}! 👋</h3>
+        <p>Complete these steps to start meeting verified people.</p>
+      </div>
+      <div class="onboarding-steps">
+        <button class="onboarding-step" data-view="verify" data-step="profile">
+          <div class="onboarding-step-num ${profileDone ? "done" : ""}">${profileDone ? icon("check") : "1"}</div>
+          <div>
+            <strong>Complete your profile</strong>
+            <small>${profileDone ? "Done — looking good!" : "Add your name, age, country, and field"}</small>
+          </div>
+          ${profileDone ? "" : icon("arrow_right")}
+        </button>
+        <button class="onboarding-step" data-view="verify" data-step="proof">
+          <div class="onboarding-step-num ${proofDone ? "done" : ""}">${proofDone ? icon("check") : "2"}</div>
+          <div>
+            <strong>Verify your role</strong>
+            <small>${proofDone ? "Verified — others can trust you!" : "Upload student/professional proof to unlock discovery"}</small>
+          </div>
+          ${proofDone ? "" : icon("arrow_right")}
+        </button>
+        <button class="onboarding-step" data-view="discover">
+          <div class="onboarding-step-num ${hasFriend ? "done" : ""}">${hasFriend ? icon("check") : "3"}</div>
+          <div>
+            <strong>Send your first request</strong>
+            <small>${hasFriend ? "Connected — great start!" : "Browse verified people and send a request"}</small>
+          </div>
+          ${hasFriend ? "" : icon("arrow_right")}
+        </button>
+      </div>
+    </article>
   `;
 }
 
@@ -1131,29 +1183,44 @@ function truthRow(label, status, detail) {
 function renderVerify() {
   const user = state.currentUser;
   const step = ["profile", "proof", "safety"].includes(state.verifyStep) ? state.verifyStep : "profile";
+  const trust = trustCompletion();
+  const isNewUser = trust === 0;
+  const firstName = displayName(user.name, "").split(" ")[0] || "there";
+
   return `
     <section class="verify-flow">
+
+      ${isNewUser ? `
+        <div class="verify-welcome-banner">
+          <div class="verify-welcome-icon">🎉</div>
+          <div>
+            <h3>Welcome to BondBridge, ${escapeHtml(firstName)}!</h3>
+            <p>Your account is ready. Complete these 3 quick steps so real people can find and trust you. It only takes a few minutes.</p>
+          </div>
+        </div>
+      ` : ""}
+
       <section class="verify-summary" aria-label="Verification summary">
         <div class="verify-person">
           <span class="verify-avatar">${escapeHtml(initials(user.name))}</span>
           <div>
-            <p class="eyebrow">Get verified</p>
+            <p class="eyebrow">Verification</p>
             <h2>${escapeHtml(displayName(user.name))}</h2>
-            <p>${escapeHtml([user.role, user.field, user.country].filter(Boolean).join(" - ") || "Add your real public details")}</p>
+            <p>${escapeHtml([user.role, user.field, user.country].filter(Boolean).join(" · ") || "Add your real public details")}</p>
           </div>
         </div>
         <div class="verify-score">
-          <span>${trustCompletion()}%</span>
+          <span>${trust}%</span>
           <div>
-            <strong>Trust ready</strong>
-            <div class="progress-track"><div class="progress-fill" style="width:${trustCompletion()}%"></div></div>
+            <strong>Trust score</strong>
+            <div class="progress-track"><div class="progress-fill" style="width:${trust}%"></div></div>
           </div>
         </div>
       </section>
 
       <nav class="verify-steps" aria-label="Verification steps">
         ${verifyStepButton("profile", "1", "Profile", "Public details", step)}
-        ${verifyStepButton("proof", "2", "Proof", `${user.role} status`, step)}
+        ${verifyStepButton("proof", "2", "Proof", `${user.role || "Role"} status`, step)}
         ${verifyStepButton("safety", "3", "Safety", "One account", step)}
       </nav>
 
@@ -1813,8 +1880,8 @@ function renderCoachPanel() {
       </div>
       <div class="suggest-list">
         ${
-          state.profiles.length
-            ? state.profiles
+          getAllProfiles().length
+            ? getAllProfiles()
                 .slice(0, 4)
                 .map(
                   (profile) => `
@@ -2007,45 +2074,55 @@ function renderLanding() {
         </div>
         <h1 class="landing-title">BondBridge</h1>
         <p class="landing-tagline">Real people. Verified. Better bonds.</p>
-        <p class="landing-sub">Connect with verified students, professionals, and families — safely and respectfully.</p>
+        <p class="landing-sub">Connect with verified students and professionals — safely, respectfully, and meaningfully.</p>
 
         <div class="landing-actions">
-          <button class="button gradient landing-btn" data-action="go-signup" title="Create account">
-            ${icon("plus")} Create account
+          <button class="button gradient landing-btn" data-action="go-signup" title="Create free account">
+            ${icon("arrow_right")} Get started free
           </button>
-          <button class="button landing-btn-outline" data-action="go-login" title="Log in">
-            ${icon("key")} Log in
-          </button>
-          <button class="button landing-btn-ghost" data-action="guest-mode" title="Explore without signing in">
-            Explore as guest
+          <button class="button landing-btn-outline" data-action="go-login" title="Log in to your account">
+            ${icon("key")} Already have an account
           </button>
         </div>
+        <button class="landing-btn-ghost" data-action="guest-mode" title="Browse without signing in">
+          Browse as guest (limited)
+        </button>
       </div>
 
       <div class="landing-features">
         <div class="landing-feature">
           ${icon("shield")}
-          <strong>Verified Only</strong>
-          <span>Every user proves real identity — no fake accounts.</span>
+          <strong>Identity Verified</strong>
+          <span>Every user proves who they are. No fakes, no bots.</span>
         </div>
         <div class="landing-feature">
-          ${icon("message")}
-          <strong>Mutual Chat</strong>
-          <span>Private chat only opens when both people agree.</span>
+          ${icon("users")}
+          <strong>Mutual Only</strong>
+          <span>Chat only opens when both people agree to connect.</span>
         </div>
         <div class="landing-feature">
           ${icon("heart")}
-          <strong>Family First</strong>
-          <span>Reminders to stay connected with the people who matter most.</span>
+          <strong>Family Reminders</strong>
+          <span>Never lose touch with people who matter most to you.</span>
         </div>
         <div class="landing-feature">
           ${icon("sparkles")}
-          <strong>AI Coach</strong>
-          <span>Get help writing respectful, clear, and warm messages.</span>
+          <strong>AI Message Coach</strong>
+          <span>Get help writing warm, clear, respectful messages.</span>
+        </div>
+        <div class="landing-feature">
+          ${icon("video")}
+          <strong>Verified Video</strong>
+          <span>Free video intros — only with verified, consenting users.</span>
+        </div>
+        <div class="landing-feature">
+          ${icon("lock")}
+          <strong>Your Privacy</strong>
+          <span>Your data is yours. Export or reset it anytime.</span>
         </div>
       </div>
 
-      <p class="landing-footer">By signing up you agree to use this platform respectfully and honestly.</p>
+      <p class="landing-footer">Free to join · No ads · Respectful by design</p>
     </div>
   `;
 }
@@ -2053,7 +2130,7 @@ function renderLanding() {
 // ─── Auth page (full-screen signup/login) ───────────────────────────────────
 function renderAuthPage() {
   const signedIn = isSignedIn();
-  const tab = state.authTab || "login";
+  const tab = state.authTab || "signup";
 
   if (signedIn) {
     return `
@@ -2084,8 +2161,8 @@ function renderAuthPage() {
         <button class="auth-back" data-action="go-landing">${icon("heart", true)} BondBridge</button>
 
         <div class="auth-tabs">
+          <button class="auth-tab ${tab === "signup" ? "active" : ""}" data-action="auth-tab-signup">Create Account</button>
           <button class="auth-tab ${tab === "login" ? "active" : ""}" data-action="auth-tab-login">Log In</button>
-          <button class="auth-tab ${tab === "signup" ? "active" : ""}" data-action="auth-tab-signup">Sign Up</button>
         </div>
 
         ${tab === "login" ? renderLoginForm() : renderSignupForm()}
@@ -2112,17 +2189,31 @@ function renderLoginForm() {
 function renderSignupForm() {
   return `
     <div class="auth-form-card">
-      <h2>Join BondBridge</h2>
-      <p class="text-muted">Create your verified account — use real details.</p>
+      <div class="auth-form-header">
+        <div class="auth-logo">${icon("heart")}</div>
+        <h2>Join BondBridge</h2>
+        <p class="text-muted">Real people. Verified. Better bonds.</p>
+      </div>
       <div class="auth-form-fields">
         ${field("Full name", "auth-name", state.auth.name || state.currentUser.name, "text", "wide")}
-        ${field("Email", "auth-email", state.auth.email, "email")}
-        ${field("Password", "auth-password", "", "password")}
-        ${selectField("I am a", "auth-role", ["Student", "Professional"], state.auth.role)}
-        ${field("Country", "auth-country", state.auth.country || state.currentUser.country)}
+        ${field("Email address", "auth-email", state.auth.email, "email", "wide")}
+        ${field("Password (min. 8 characters)", "auth-password", "", "password", "wide")}
+        <div class="auth-field-row">
+          ${selectField("I am a", "auth-role", ["Student", "Professional"], state.auth.role || state.currentUser.role)}
+          ${selectField("Gender", "auth-gender", ["Male", "Female"], state.currentUser.gender)}
+        </div>
+        <div class="auth-field-row">
+          ${field("Age", "auth-age", state.currentUser.age || "", "number")}
+          ${field("Country", "auth-country", state.auth.country || state.currentUser.country)}
+        </div>
+        <div class="auth-field-row">
+          ${selectField("Field / Subject", "auth-field", fieldOptions.filter(f => f !== "Any"), state.currentUser.field || "Computer Science")}
+          ${field("University / Company", "auth-org", state.currentUser.organization)}
+        </div>
       </div>
-      <button class="button gradient large auth-submit" data-action="auth-signup">${icon("plus")} Create account</button>
-      <p class="auth-switch">Already have an account? <button class="link-button" data-action="auth-tab-login">Log in</button></p>
+      <button class="button gradient large auth-submit" data-action="auth-signup">${icon("arrow_right")} Create my account</button>
+      <p class="auth-switch">Already have an account? <button class="link-button" data-action="auth-tab-login">Log in instead</button></p>
+      <p class="auth-legal">By signing up you agree to be honest, respectful, and to use only one account.</p>
     </div>
   `;
 }
@@ -2130,6 +2221,8 @@ function renderSignupForm() {
 // ─── Settings view (replaces separate admin + privacy pages) ─────────────────
 function renderSettings() {
   const signedIn = isSignedIn();
+  const user = state.currentUser;
+  const trust = trustCompletion();
   const counts = {
     profiles: getAllProfiles().filter(p => !p.isDemo).length,
     family: state.family.length,
@@ -2141,27 +2234,67 @@ function renderSettings() {
     <section class="settings-screen">
       <div class="settings-sections">
 
+        <!-- Account card -->
         <article class="settings-block">
           <p class="eyebrow">Account</p>
-          <h2>${signedIn ? escapeHtml(displayName(state.currentUser.name)) : "Not signed in"}</h2>
-          ${signedIn
-            ? `<p class="text-muted">${escapeHtml(state.auth.email || "")} · Trust ${trustCompletion()}%</p>
-               <div class="row wrap" style="margin-top:12px">
-                 <button class="button primary" data-view="verify">${icon("shield")}Get verified</button>
-                 <button class="button danger" data-action="auth-logout">${icon("ban")}Sign out</button>
-               </div>`
-            : `<button class="button gradient" data-view="auth">${icon("key")}Sign in / Sign up</button>`
-          }
+          ${signedIn ? `
+            <div class="settings-account-header">
+              ${avatarNode(user, "sm")}
+              <div>
+                <h2>${escapeHtml(displayName(user.name))}</h2>
+                <p>${escapeHtml(state.auth.email || "")} · Trust ${trust}%</p>
+              </div>
+            </div>
+            <div class="progress-track" style="margin: 8px 0 16px">
+              <div class="progress-fill" style="width:${trust}%"></div>
+            </div>
+            <div class="settings-list">
+              <button class="settings-row" data-view="verify">
+                <span>${icon("shield")}</span>
+                <div>
+                  <strong>${trust >= 80 ? "You are verified" : "Complete verification"}</strong>
+                  <small>${trust >= 80 ? "Other users can see your verified badge" : `${trust}% done — finish to unlock full discovery`}</small>
+                </div>
+                ${icon("arrow_right")}
+              </button>
+              <button class="settings-row" data-view="discover">
+                <span>${icon("search")}</span>
+                <div><strong>Browse people</strong><small>Discover verified users and send requests</small></div>
+                ${icon("arrow_right")}
+              </button>
+            </div>
+            <div class="row wrap" style="margin-top:14px">
+              <button class="button danger" data-action="auth-logout">${icon("logout")}Sign out</button>
+            </div>
+          ` : `
+            <h2>Not signed in</h2>
+            <p class="text-muted" style="margin:4px 0 14px">Sign in to connect with verified people, manage your profile, and more.</p>
+            <button class="button gradient" data-action="go-signup">${icon("arrow_right")}Create free account</button>
+            <button class="button" style="margin-top:8px" data-action="go-login">${icon("key")}Log in</button>
+          `}
         </article>
 
+        <!-- Appearance -->
         <article class="settings-block">
-          <p class="eyebrow">Your data</p>
-          <h2>Privacy & storage</h2>
-          <div class="metric-strip" style="margin:12px 0">
+          <p class="eyebrow">Appearance</p>
+          <h2>Theme</h2>
+          <button class="settings-row" data-action="toggle-theme">
+            <span>${icon(state.theme === "dark" ? "sun" : "moon")}</span>
+            <div>
+              <strong>${state.theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}</strong>
+              <small>Currently using ${state.theme} mode</small>
+            </div>
+          </button>
+        </article>
+
+        <!-- Privacy & data -->
+        <article class="settings-block">
+          <p class="eyebrow">Privacy</p>
+          <h2>Your data</h2>
+          <div class="metric-strip" style="margin:4px 0 14px">
             ${metricPill("Live users", counts.profiles)}
             ${metricPill("Messages", counts.chats)}
             ${metricPill("Family", counts.family)}
-            ${metricPill("Reports", counts.reports)}
           </div>
           <div class="settings-list">
             <button class="settings-row" data-action="export-data">
@@ -2170,7 +2303,7 @@ function renderSettings() {
             </button>
             <button class="settings-row" data-action="restore-skipped">
               <span>${icon("check")}</span>
-              <div><strong>Restore skipped profiles</strong><small>Bring back people you passed on</small></div>
+              <div><strong>Restore skipped profiles</strong><small>Bring back people you previously passed on</small></div>
             </button>
             <button class="settings-row danger" data-action="reset-data">
               <span>${icon("trash")}</span>
@@ -2179,10 +2312,10 @@ function renderSettings() {
           </div>
         </article>
 
-        ${state.reports.length || state.currentUser.proofQueue.length ? `
+        ${state.reports.length ? `
         <article class="settings-block">
           <p class="eyebrow">Safety</p>
-          <h2>Your reports & verification</h2>
+          <h2>Your reports</h2>
           <div class="list">
             ${state.reports.slice(0, 5).map((report) => {
               const profile = profileById(report.profileId);
@@ -2190,7 +2323,7 @@ function renderSettings() {
                 <div class="request-row">
                   <div>
                     <strong>${escapeHtml(profile ? profile.name : "Unknown user")}</strong>
-                    <p class="small text-muted">${escapeHtml(report.message)}</p>
+                    <p class="small text-muted">${escapeHtml(report.message || "Reported for review")}</p>
                   </div>
                   <span class="badge ${report.priority === "High" ? "rose" : "amber"}">${escapeHtml(report.status || "open")}</span>
                 </div>
@@ -2200,13 +2333,18 @@ function renderSettings() {
         </article>
         ` : ""}
 
+        <!-- About -->
         <article class="settings-block">
-          <p class="eyebrow">Appearance</p>
-          <h2>Theme</h2>
-          <button class="settings-row" data-action="toggle-theme">
-            <span>${icon(state.theme === "dark" ? "sun" : "moon")}</span>
-            <div><strong>${state.theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}</strong><small>Currently ${state.theme} mode</small></div>
-          </button>
+          <p class="eyebrow">About</p>
+          <h2>BondBridge</h2>
+          <p class="text-muted" style="margin:4px 0 12px;font-size:0.9rem">Free · No ads · Respectful by design. Every user is verified before they can connect.</p>
+          <div class="settings-list">
+            <button class="settings-row" data-view="privacy">
+              <span>${icon("lock")}</span>
+              <div><strong>Privacy policy</strong><small>How we protect your data</small></div>
+              ${icon("arrow_right")}
+            </button>
+          </div>
         </article>
 
       </div>
@@ -3240,7 +3378,28 @@ async function refreshSignedInData(showToast = false) {
 
 async function signupAccount() {
   const password = getValue("auth-password");
-  saveAuthDraft();
+  // Read all form fields
+  state.auth.name = getValue("auth-name") || state.auth.name;
+  state.auth.email = getValue("auth-email") || state.auth.email;
+  state.auth.role = getValue("auth-role") || state.auth.role || "Student";
+  state.auth.country = getValue("auth-country") || state.auth.country;
+  state.currentUser.name = state.auth.name || state.currentUser.name;
+  state.currentUser.role = state.auth.role || state.currentUser.role;
+  state.currentUser.country = state.auth.country || state.currentUser.country;
+  state.currentUser.gender = getValue("auth-gender") || state.currentUser.gender || "Male";
+  state.currentUser.age = Number(getValue("auth-age")) || state.currentUser.age || 18;
+  state.currentUser.field = getValue("auth-field") || state.currentUser.field || "Computer Science";
+  state.currentUser.organization = getValue("auth-org") || state.currentUser.organization || "";
+
+  if (!state.auth.name || !state.auth.email || !password) {
+    toast("Please fill in your name, email, and password.");
+    return;
+  }
+  if (password.length < 8) {
+    toast("Password must be at least 8 characters.");
+    return;
+  }
+
   const result = await apiJson("/api/auth/signup", {
     method: "POST",
     body: JSON.stringify({
@@ -3253,9 +3412,13 @@ async function signupAccount() {
       age: state.currentUser.age,
       field: state.currentUser.field,
       organization: state.currentUser.organization,
-      languages: state.currentUser.languages.split(",").map((item) => item.trim()).filter(Boolean),
-      purposes: state.currentUser.purpose.split(",").map((item) => item.trim()).filter(Boolean),
-      bio: state.currentUser.purpose,
+      languages: typeof state.currentUser.languages === "string"
+        ? state.currentUser.languages.split(",").map((item) => item.trim()).filter(Boolean)
+        : (state.currentUser.languages || ["English"]),
+      purposes: typeof state.currentUser.purpose === "string"
+        ? state.currentUser.purpose.split(",").map((item) => item.trim()).filter(Boolean)
+        : ["Friendship"],
+      bio: `${state.auth.role} from ${state.auth.country} studying ${state.currentUser.field}.`,
     }),
   });
   if (result.ok) {
@@ -3267,20 +3430,32 @@ async function signupAccount() {
       signedIn: Boolean(authAccessToken),
       expiresAt: result.payload?.session?.expires_at || "",
     };
-    setAuthResult("Signup request completed", "Supabase accepted the account request. Continue with profile proof.", result.payload);
-    toast("Signup completed.");
+    toast(`Welcome to BondBridge, ${state.currentUser.name.split(" ")[0]}! Complete your profile to get verified.`);
+    state.view = "verify";
+    state.verifyStep = "profile";
     await refreshSignedInData(false);
   } else {
-    setAuthResult("Signup unavailable", result.payload?.message || "Signup could not complete.", result.payload);
-    toast("Signup route needs Supabase config.");
+    const msg = result.payload?.message || "";
+    if (msg.toLowerCase().includes("already")) {
+      toast("An account with this email already exists. Try logging in.");
+      state.authTab = "login";
+    } else {
+      toast(result.status === 0 ? "No internet connection. Check your connection and try again." : (msg || "Signup failed. Please try again."));
+    }
   }
   saveState();
   render();
 }
 
 async function loginAccount() {
+  state.auth.email = getValue("auth-email") || state.auth.email;
   const password = getValue("auth-password");
-  saveAuthDraft();
+
+  if (!state.auth.email || !password) {
+    toast("Please enter your email and password.");
+    return;
+  }
+
   const result = await apiJson("/api/auth/login", {
     method: "POST",
     body: JSON.stringify({
@@ -3297,12 +3472,17 @@ async function loginAccount() {
       signedIn: Boolean(authAccessToken),
       expiresAt: result.payload?.session?.expires_at || "",
     };
-    setAuthResult("Login completed", "Supabase returned an auth response for this account.", result.payload);
-    toast("Logged in.");
+    const name = state.currentUser.name ? state.currentUser.name.split(" ")[0] : "back";
+    toast(`Welcome back, ${name}!`);
+    state.view = "dashboard";
     await refreshSignedInData(false);
   } else {
-    setAuthResult("Login unavailable", result.payload?.message || "Login could not complete.", result.payload);
-    toast("Login route needs Supabase config.");
+    const msg = result.payload?.message || "";
+    if (msg.toLowerCase().includes("invalid") || msg.toLowerCase().includes("wrong") || msg.toLowerCase().includes("credentials")) {
+      toast("Incorrect email or password. Please try again.");
+    } else {
+      toast(result.status === 0 ? "No internet connection. Check your connection and try again." : (msg || "Login failed. Please try again."));
+    }
   }
   saveState();
   render();
@@ -3414,6 +3594,11 @@ document.addEventListener("click", async (event) => {
     // If navigating away from landing/auth into the app, treat as guest mode
     if (!isSignedIn() && !["auth", "landing"].includes(view)) {
       state.guestMode = true;
+    }
+    // Support data-step alongside data-view (e.g. onboarding buttons)
+    const step = button.dataset.step;
+    if (step && view === "verify" && ["profile", "proof", "safety"].includes(step)) {
+      state.verifyStep = step;
     }
     saveState();
     render();
