@@ -17,89 +17,21 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Mirror live BondBridge app
-        env:
-          LIVE_SITE: https://bondbridge-verified-20260813.tabisharshad51.chatgpt.site
-        run: |
-          set -euo pipefail
-          mkdir -p public
+      - name: Checkout source
+        uses: actions/checkout@v4
 
-          curl -fsSL "$LIVE_SITE/" -o public/index.html
-          curl -fsSL "$LIVE_SITE/styles.css" -o public/styles.css
-          curl -fsSL "$LIVE_SITE/app.js" -o public/app.js
-          curl -fsSL "$LIVE_SITE/manifest" -o public/manifest.webmanifest
-          curl -fsSL "$LIVE_SITE/app-icon" -o public/icon.svg
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
+      - name: Build GitHub Pages app
+        run: npm run build:github-pages
 
-          live_site = "https://bondbridge-verified-20260813.tabisharshad51.chatgpt.site"
-
-          index = Path("public/index.html")
-          html = index.read_text(encoding="utf-8")
-          html = html.replace('href="/manifest"', 'href="./manifest.webmanifest"')
-          html = html.replace('href="/app-icon"', 'href="./icon.svg"')
-          html = html.replace('src="/app.js"', 'src="./app.js"')
-          html = html.replace('href="/styles.css"', 'href="./styles.css"')
-          html = html.replace(
-              '<script src="./app.js"></script>',
-              f'<script>window.BONDBRIDGE_API_BASE = "{live_site}";</script>\n    <script src="./app.js"></script>',
-          )
-          index.write_text(html, encoding="utf-8")
-
-          manifest_path = Path("public/manifest.webmanifest")
-          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-          manifest["id"] = "./"
-          manifest["start_url"] = "./"
-          manifest["scope"] = "./"
-          for icon in manifest.get("icons", []):
-              icon["src"] = "./icon.svg"
-          for shortcut in manifest.get("shortcuts", []):
-              if shortcut.get("url", "").startswith("/"):
-                  shortcut["url"] = "." + shortcut["url"]
-              for icon in shortcut.get("icons", []):
-                  icon["src"] = "./icon.svg"
-          manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-
-          Path("public/sw.js").write_text('''const CACHE_NAME = "bondbridge-github-pages-v1";
-          const APP_SHELL = ["./", "./manifest.webmanifest", "./icon.svg"];
-
-          self.addEventListener("install", (event) => {
-            event.waitUntil(
-              caches.open(CACHE_NAME)
-                .then((cache) => cache.addAll(APP_SHELL))
-                .then(() => self.skipWaiting()),
-            );
-          });
-
-          self.addEventListener("activate", (event) => {
-            event.waitUntil(
-              caches.keys()
-                .then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))))
-                .then(() => self.clients.claim()),
-            );
-          });
-
-          self.addEventListener("fetch", (event) => {
-            if (event.request.method !== "GET") return;
-            const url = new URL(event.request.url);
-            if (url.origin !== self.location.origin) return;
-            if (event.request.mode === "navigate") {
-              event.respondWith(fetch(event.request).catch(() => caches.match("./")));
-              return;
-            }
-            event.respondWith(caches.match(event.request).then((cached) => cached || fetch(event.request)));
-          });
-          ''', encoding="utf-8")
-          PY
-
-          touch public/.nojekyll
-
-      - name: Publish to gh-pages branch
+      - name: Publish to gh-pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_branch: gh-pages
-          publish_dir: ./public
+          publish_dir: ./dist/github-pages
           force_orphan: true
