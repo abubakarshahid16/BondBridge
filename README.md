@@ -1,63 +1,88 @@
-# BondBridge
+# BondBridge Verified
 
-BondBridge is a trust-first social connection app for verified students, professionals, families, friendships, serious relationships, and global respectful conversations.
+A trust-first relationship app for verified students, professionals, families, friendships, and serious connections.
 
-## Use The App
+## Open
 
-- Live production app: https://bondbridge-verified-20260813.tabisharshad51.chatgpt.site
-- GitHub Pages install app: https://abubakarshahid16.github.io/BondBridge/
+Open `index.html` in a browser for local UI testing. The deployed version runs on an OpenAI Sites worker with backend API routes.
 
-## Install On Phone Or Desktop
+Live production site: https://bondbridge-verified-20260813.tabisharshad51.chatgpt.site
 
-Android / Chrome:
+GitHub source and installable Pages app:
 
-1. Open the GitHub Pages app link.
-2. Tap the browser menu.
-3. Tap Install app or Add to Home screen.
+- Source: https://github.com/abubakarshahid16/BondBridge
+- GitHub Pages: https://abubakarshahid16.github.io/BondBridge/
 
-IPhone / Safari:
+## Deploy
 
-1. Open the GitHub Pages app link.
-2. Tap Share.
-3. Tap Add to Home Screen.
+This folder is connected to OpenAI Sites. `npm run build` creates `dist/server/index.js` and copies `.openai/hosting.json` so the app can be published as a production Sites worker.
 
-Desktop Chrome / Edge:
+`npm run build:github-pages` creates `dist/github-pages`, a static installable PWA for GitHub Pages. That static build calls the live free backend at the production site URL for API routes.
 
-1. Open the GitHub Pages app link.
-2. Click the install icon in the address bar, or use browser menu > Install app.
+GitHub Actions deploys the installable PWA automatically from `main` to the `gh-pages` branch. Push source changes to GitHub and Pages rebuilds without paid hosting.
 
-## One-Time GitHub Pages Switch
+## Live Data Rule
 
-The workflow already builds and pushes the installable app to the `gh-pages` branch. For a brand-new repo, GitHub requires the owner to enable Pages once:
+BondBridge does not seed fake strangers, fake chats, fake reports, or fake family members. Discovery only shows profiles returned by Supabase after real users sign up and pass the verification rules. If the database has no approved users yet, the app shows an honest empty state.
 
-1. Open `Settings` in this repo.
-2. Open `Pages` from the left sidebar.
-3. Under `Build and deployment`, set `Source` to `Deploy from a branch`.
-4. Set `Branch` to `gh-pages` and folder to `/ (root)`.
-5. Click `Save`.
+## SaaS Backend Routes
 
-After saving, the app should be live at https://abubakarshahid16.github.io/BondBridge/ within 1-3 minutes.
+- `GET /health`
+- `GET /api/status`
+- `GET /api/profiles`
+- `POST /api/auth/signup`
+- `POST /api/auth/login`
+- `POST /api/checkout`
+- `POST /api/identity/session`
+- `POST /api/video/room`
+- `POST /api/moderate`
 
-## What Is Included
+The Launch page in the app calls these routes and shows whether the free stack is connected.
 
-- Instagram-style feed and story UI
-- Responsive mobile, tablet, laptop, and desktop layout
-- Installable PWA shell
-- Verified stranger discovery flow
-- Family and friend reminder flows
+## Included In This V1
+
+- Instagram-style social feed with dark-first layout, white mode toggle, left rail, story circles, post cards, and gradient accents
+- Fully responsive app/web layout that automatically adjusts for phone, tablet, laptop, and desktop screens
+- Installable PWA for Android, iPhone home screen, and desktop browsers
+- Real account page with signup/login calls and no saved passwords or displayed auth tokens
+- Live verified profile sync from Supabase; no fabricated discovery users
+- Mobile bottom navigation inspired by modern social apps
+- Local story photo upload
+- Public profile photo upload
+- Verified stranger live-video lounge with start, end, next, request, screen-share, AI help, and report controls
+- Chat image/file attachment controls with local image preview
+- Simple guided verification flow with Profile, Proof, and Safety steps
+- Proof file selection for student or professional evidence
+- Feed posts for verified meeting, family reminders, and safety
+- Trusted-circles rail inspired by social story discovery
+- Verified meet lounge with video-style preview, start, skip, request, translate, screen-share, and report controls
+- Message-request and hidden-words safety patterns
+- Verified profile and proof center
+- Student/professional proof workflow
+- Gender/profile truth and one-account policy UI
+- Global discovery by country, gender, field, and purpose
+- Verified community circles
+- Mutual connection requests
 - Respectful chat with foul-language blocking
-- AI-style local message coach
-- Profile photo and proof-upload UI
-- Video lounge UI with browser-native WebRTC path
-- Safety, proof review, data export, and local privacy controls
-- Free backend path through the deployed production app
+- AI-style message and relationship coach
+- Family/friend reconnection reminders
+- Consent-based call and screen-share request controls
+- Simplified safety center with report cards, proof review cards, respect scores, suspend, restore, and resolve flows
+- Privacy vault with local export/reset controls
+- SaaS Launch Console for Supabase, free browser video, manual proof review, local coach/safety, and privacy readiness
+- Production worker API for health, status, signup, free beta path checks, proof review, authenticated video room creation, and moderation
+- Supabase schema with RLS policies in `supabase-schema.sql`
+- Environment template in `.env.example`
+- PWA manifest, service worker, app icon, and install button served by the production worker
 
-## Free Stack
+## Production Integrations
 
-This version avoids paid APIs. It uses the live production site for API routes and can use Supabase free tier plus browser-native WebRTC for real-time/video features.
+The current production stack avoids paid APIs. Add the Supabase public runtime variables in Sites and the app can launch with:
 
-## GitHub Pages Deployment
+- Supabase for auth, database, storage, and encrypted sync
+- Browser-native WebRTC for camera, microphone, and screen share
+- Supabase `webrtc_rooms` and `webrtc_signals` for authenticated call signaling; room creation requires a signed-in verified profile
+- Supabase proof queues for student/professional verification review
+- Local respectful-message drafts and foul-language moderation without a model API key
 
-The workflow in `.github/workflows/deploy-pages.yml` mirrors the live production app into the `gh-pages` branch as an installable PWA.
-
-Important: GitHub Pages may take 1-3 minutes after each workflow run before the public URL is live.
+See `PRODUCTION.md` and `.env.example`.

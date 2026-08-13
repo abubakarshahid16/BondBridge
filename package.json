@@ -1,0 +1,15 @@
+{
+  "name": "bondbridge-verified",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "build:github-pages": "node build-github-pages.mjs",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "dependencies": {
+    "vite": "^7.1.2"
+  },
+  "devDependencies": {}
+}
