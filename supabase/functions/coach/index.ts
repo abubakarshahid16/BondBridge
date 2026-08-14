@@ -161,6 +161,36 @@ async function handleVerifyProof(apiKey: string, body: Record<string, unknown>) 
   }
 }
 
+// Hands out short-lived TURN credentials for video calls, so the TURN
+// provider's API key never has to be shipped in client-side code (the same
+// reasoning as GROQ_API_KEY above). Returns an empty list — not an error —
+// when no key is configured yet, so the app quietly falls back to
+// STUN-only rather than breaking calls.
+//
+// SETUP (optional — calls already work without this, just less reliably
+// across some mobile networks): sign up free at metered.ca (no credit
+// card, 500MB/month free), find your "app name" under the TURN Server
+// product, then add TWO secrets in Edge Functions → coach → Secrets:
+//   METERED_API_KEY  = your API key
+//   METERED_APP_NAME = the app name shown in your Metered dashboard
+async function handleTurnCredentials() {
+  const apiKey = Deno.env.get("METERED_API_KEY");
+  const appName = Deno.env.get("METERED_APP_NAME");
+  if (!apiKey || !appName) return json({ ok: true, iceServers: [] });
+  try {
+    const response = await fetch(
+      `https://${appName}.metered.live/api/v1/turn/credentials?apiKey=${encodeURIComponent(apiKey)}`,
+    );
+    if (!response.ok) return json({ ok: true, iceServers: [] });
+    const iceServers = await response.json();
+    if (!Array.isArray(iceServers)) return json({ ok: true, iceServers: [] });
+    return json({ ok: true, iceServers });
+  } catch (error) {
+    console.error("TURN credentials failure", error);
+    return json({ ok: true, iceServers: [] });
+  }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -169,16 +199,20 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, message: "Use POST." }, 405);
   }
 
-  const apiKey = Deno.env.get("GROQ_API_KEY");
-  if (!apiKey) {
-    return json({ ok: false, message: "Coach is not configured yet." }, 200);
-  }
-
   let body: Record<string, unknown> = {};
   try {
     body = await req.json();
   } catch {
     return json({ ok: false, message: "Invalid request." }, 400);
+  }
+
+  if (body?.type === "turn-credentials") {
+    return handleTurnCredentials();
+  }
+
+  const apiKey = Deno.env.get("GROQ_API_KEY");
+  if (!apiKey) {
+    return json({ ok: false, message: "Coach is not configured yet." }, 200);
   }
 
   if (body?.type === "verify-proof") {

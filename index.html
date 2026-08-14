@@ -32,6 +32,11 @@
       window.BONDBRIDGE_SUPABASE_URL = "https://fpbodwjgypxzqpstwcvo.supabase.co";
       window.BONDBRIDGE_SUPABASE_KEY = "sb_publishable_nLwhMDYKDfAY_OP-o3c-iA_LJtQ2Ai_";
       window.BONDBRIDGE_AI_URL = "https://fpbodwjgypxzqpstwcvo.supabase.co/functions/v1/coach";
+      // Same Edge Function as above — it also hands out short-lived TURN
+      // credentials (see the coach function's "turn-credentials" type) once
+      // a TURN provider API key is added as a secret. Falls back to
+      // STUN-only automatically if that secret isn't set yet.
+      window.BONDBRIDGE_TURN_URL = "https://fpbodwjgypxzqpstwcvo.supabase.co/functions/v1/coach";
     </script>
     <!-- Bundled locally rather than loaded from a CDN, so the app still works
          if the CDN is blocked, slow, or down. -->

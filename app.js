@@ -84,11 +84,53 @@ let installPromptEvent = null;
 let authAccessToken = "";
 
 // ─── Real WebRTC video calling (Supabase Realtime signaling, free STUN) ─────
-const RTC_CONFIG = {
+// STUN alone only works when both people are on networks that allow direct
+// peer-to-peer traffic through. Mobile carrier networks very often use
+// carrier-grade NAT that STUN can't punch through — with STUN-only, those
+// calls silently stall at "connecting" forever with no error, which looks
+// exactly like "the other person couldn't pick up." A TURN server relays
+// the call's media when a direct path isn't possible.
+//
+// The free public demo TURN servers that used to be hardcoded here
+// (openrelay.metered.ca and similar) have all been shut down — their
+// domains no longer resolve. There is currently no legitimate free TURN
+// service that doesn't require an account. getIceServers() below fetches
+// short-lived TURN credentials from a Supabase Edge Function (so the
+// provider's API key stays server-side, never shipped in this file) when
+// one is configured, and safely falls back to STUN-only otherwise — so
+// calls between two networks that both allow direct connections keep
+// working today, and every call gets TURN automatically the moment a free
+// Metered.ca (or similar) API key is added as an Edge Function secret.
+const STUN_ONLY_CONFIG = {
   iceServers: [
-    { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
   ],
 };
+
+async function getIceServers() {
+  const url = window.BONDBRIDGE_TURN_URL || "";
+  const key = window.BONDBRIDGE_SUPABASE_KEY || "";
+  const token = authAccessToken || "";
+  if (!url || !key || !token) return STUN_ONLY_CONFIG;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 6000);
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, apikey: key },
+      body: JSON.stringify({ type: "turn-credentials" }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!response.ok) return STUN_ONLY_CONFIG;
+    const data = await response.json();
+    if (!data?.ok || !Array.isArray(data.iceServers) || !data.iceServers.length) return STUN_ONLY_CONFIG;
+    return { iceServers: [...STUN_ONLY_CONFIG.iceServers, ...data.iceServers] };
+  } catch {
+    return STUN_ONLY_CONFIG;
+  }
+}
 let callPeerConnection = null;
 let remoteVideoStream = null;
 let callSignalChannel = null;
@@ -96,6 +138,7 @@ let seenCallSignalIds = new Set();
 let ringAudioCtx = null;
 let ringIntervalId = null;
 let incomingCallTimeoutId = null;
+let callConnectTimeoutId = null;
 
 // Plays a repeating two-tone ring using the Web Audio API — no audio file
 // to fetch, so it works instantly and offline. Loops until stopRingtone().
@@ -3008,12 +3051,28 @@ async function beginCall({ roomId, peerId, peerName, role }) {
     } catch { /* best effort — RLS will reject if not allowed */ }
   }
 
-  callPeerConnection = new RTCPeerConnection(RTC_CONFIG);
+  const iceConfig = await getIceServers();
+  callPeerConnection = new RTCPeerConnection(iceConfig);
   localVideoStream.getTracks().forEach((track) => callPeerConnection.addTrack(track, localVideoStream));
+
+  // Without a TURN relay, a call that can't find a peer-to-peer path (common
+  // on mobile carrier networks) just sits at "connecting" forever with no
+  // error — which looks exactly like "the other person couldn't pick up."
+  // Now that a TURN relay is configured this should be rare, but this
+  // timeout is the backstop: if we're not actually connected within 25s,
+  // say so plainly instead of leaving both people staring at a frozen screen.
+  if (callConnectTimeoutId) clearTimeout(callConnectTimeoutId);
+  callConnectTimeoutId = window.setTimeout(() => {
+    if (state.call && state.call.status !== "active") {
+      toast("Could not connect the call — check your internet connection and try again.");
+      endCall(true);
+    }
+  }, 25000);
 
   callPeerConnection.ontrack = (event) => {
     remoteVideoStream = event.streams[0];
     if (state.call) state.call.status = "active";
+    if (callConnectTimeoutId) { clearTimeout(callConnectTimeoutId); callConnectTimeoutId = null; }
     render();
   };
 
@@ -3098,6 +3157,7 @@ async function handleCallSignal(signal) {
 
 async function endCall(notifyPeer) {
   const activeCall = state.call;
+  if (callConnectTimeoutId) { clearTimeout(callConnectTimeoutId); callConnectTimeoutId = null; }
   if (notifyPeer && activeCall) {
     try {
       await sendCallSignal("leave", {});
