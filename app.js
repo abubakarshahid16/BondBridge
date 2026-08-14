@@ -93,6 +93,83 @@ let callPeerConnection = null;
 let remoteVideoStream = null;
 let callSignalChannel = null;
 let seenCallSignalIds = new Set();
+let ringAudioCtx = null;
+let ringIntervalId = null;
+let incomingCallTimeoutId = null;
+
+// Plays a repeating two-tone ring using the Web Audio API — no audio file
+// to fetch, so it works instantly and offline. Loops until stopRingtone().
+function startRingtone() {
+  stopRingtone();
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    ringAudioCtx = new Ctx();
+    const playTone = () => {
+      if (!ringAudioCtx) return;
+      [0, 0.35].forEach((delay) => {
+        const osc = ringAudioCtx.createOscillator();
+        const gain = ringAudioCtx.createGain();
+        osc.type = "sine";
+        osc.frequency.value = 880;
+        gain.gain.value = 0.0001;
+        osc.connect(gain);
+        gain.connect(ringAudioCtx.destination);
+        const startAt = ringAudioCtx.currentTime + delay;
+        gain.gain.setValueAtTime(0.0001, startAt);
+        gain.gain.exponentialRampToValueAtTime(0.18, startAt + 0.05);
+        gain.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.3);
+        osc.start(startAt);
+        osc.stop(startAt + 0.32);
+      });
+    };
+    playTone();
+    ringIntervalId = window.setInterval(playTone, 2000);
+  } catch { /* ringing is a nice-to-have — never block the call over it */ }
+}
+
+function stopRingtone() {
+  if (ringIntervalId) {
+    clearInterval(ringIntervalId);
+    ringIntervalId = null;
+  }
+  if (ringAudioCtx) {
+    try { ringAudioCtx.close(); } catch { /* ignore */ }
+    ringAudioCtx = null;
+  }
+}
+
+// Ask once, right after sign-in, so the permission prompt has an obvious
+// reason attached to it instead of appearing out of nowhere mid-call.
+function requestCallNotificationPermission() {
+  try {
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission().catch(() => {});
+    }
+  } catch { /* best effort */ }
+}
+
+// Browser notification for an incoming call, so it's noticeable even if
+// BondBridge isn't the focused tab. This only works while the browser is
+// open — a fully closed browser/app needs native push, which a plain PWA
+// on a free plan can't do without a push server, so this is the practical
+// ceiling for "ring outside the app" here.
+function notifyIncomingCall(peerName) {
+  try {
+    if (!("Notification" in window)) return;
+    if (Notification.permission === "granted") {
+      const note = new Notification("Incoming BondBridge call", {
+        body: `${peerName || "Someone you're connected with"} is calling you.`,
+        icon: "./icon.svg",
+        tag: "bondbridge-incoming-call",
+        renotify: true,
+      });
+      note.onclick = () => { window.focus(); note.close(); };
+    } else if (Notification.permission !== "denied") {
+      Notification.requestPermission().catch(() => {});
+    }
+  } catch { /* best effort */ }
+}
 
 const launchProviders = [
   {
@@ -2835,26 +2912,40 @@ function attachCallVideos() {
 // it renders globally so it works no matter which page I'm looking at.
 async function handleIncomingCall(room) {
   if (!room || room.status !== "waiting" || state.call) return;
-  const client = getSupabase();
   const peer = profileById(room.host_user_id);
+  const peerName = peer?.name || "Someone you're connected with";
   state.incomingCall = {
     roomId: room.id,
     peerId: room.host_user_id,
-    peerName: peer?.name || "Someone you're connected with",
+    peerName,
   };
+  startRingtone();
+  notifyIncomingCall(peerName);
+  // Auto-clear like a real phone: don't leave the banner (and ringtone)
+  // running forever if nobody answers.
+  if (incomingCallTimeoutId) clearTimeout(incomingCallTimeoutId);
+  incomingCallTimeoutId = window.setTimeout(() => {
+    if (state.incomingCall?.roomId === room.id) {
+      declineIncomingCall(true);
+    }
+  }, 45000);
   render();
 }
 
 async function acceptIncomingCall() {
   const invite = state.incomingCall;
   if (!invite) return;
+  if (incomingCallTimeoutId) { clearTimeout(incomingCallTimeoutId); incomingCallTimeoutId = null; }
+  stopRingtone();
   state.incomingCall = null;
   await beginCall({ roomId: invite.roomId, peerId: invite.peerId, peerName: invite.peerName, role: "guest" });
 }
 
-async function declineIncomingCall() {
+async function declineIncomingCall(missed = false) {
   const invite = state.incomingCall;
   if (!invite) return;
+  if (incomingCallTimeoutId) { clearTimeout(incomingCallTimeoutId); incomingCallTimeoutId = null; }
+  stopRingtone();
   state.incomingCall = null;
   const client = getSupabase();
   if (client) {
@@ -2862,7 +2953,7 @@ async function declineIncomingCall() {
       await client.from("webrtc_rooms").update({ status: "ended" }).eq("id", invite.roomId);
     } catch { /* best effort */ }
   }
-  toast("Call declined.");
+  toast(missed ? `Missed call from ${invite.peerName || "someone"}.` : "Call declined.");
   render();
 }
 
@@ -4541,6 +4632,7 @@ async function signupAccount() {
     state.view = "verify";
     state.verifyStep = "profile";
     startRealtime();
+    requestCallNotificationPermission();
     await refreshSignedInData(false);
   } else {
     const msg = result.payload?.message || "";
@@ -4584,6 +4676,7 @@ async function loginAccount() {
     toast(`Welcome back, ${name}!`);
     state.view = "dashboard";
     startRealtime();
+    requestCallNotificationPermission();
     await refreshSignedInData(false);
   } else {
     const msg = result.payload?.message || "";
@@ -4697,6 +4790,8 @@ document.addEventListener("click", async (event) => {
   }
   if (action === "auth-logout") {
     if (state.call) await endCall(true);
+    if (incomingCallTimeoutId) { clearTimeout(incomingCallTimeoutId); incomingCallTimeoutId = null; }
+    stopRingtone();
     state.incomingCall = null;
     stopRealtime();
     const client = getSupabase();
@@ -5140,12 +5235,35 @@ function startRealtime() {
     .on("postgres_changes", { event: "*", schema: "public", table: "connections" }, () => {
       handleConnectionChange().catch(() => {});
     })
-    // A connection is calling me → show accept/decline
+    // A connection is calling me → show accept/decline.
+    // No server-side filter here on purpose: a filter built from
+    // state.currentUser.id at subscribe time can capture a stale/placeholder
+    // id if this channel opens (e.g. via onAuthStateChange) before the app
+    // finishes writing the real signed-in user id — that would silently
+    // subscribe to the wrong person's calls forever. Instead we subscribe to
+    // every new room and check the real, current user id inside the handler
+    // itself, which is always accurate at the moment the event fires.
     .on(
       "postgres_changes",
-      { event: "INSERT", schema: "public", table: "webrtc_rooms", filter: `guest_user_id=eq.${state.currentUser.id}` },
+      { event: "INSERT", schema: "public", table: "webrtc_rooms" },
       (payload) => {
+        if (payload.new?.guest_user_id !== state.currentUser.id) return;
         handleIncomingCall(payload.new).catch(() => {});
+      },
+    )
+    // The caller hung up before I answered — stop ringing instead of
+    // leaving a dead call banner up for 45 seconds.
+    .on(
+      "postgres_changes",
+      { event: "UPDATE", schema: "public", table: "webrtc_rooms" },
+      (payload) => {
+        if (payload.new?.id !== state.incomingCall?.roomId) return;
+        if (payload.new?.status === "ended") {
+          if (incomingCallTimeoutId) { clearTimeout(incomingCallTimeoutId); incomingCallTimeoutId = null; }
+          stopRingtone();
+          state.incomingCall = null;
+          render();
+        }
       },
     )
     .subscribe();
