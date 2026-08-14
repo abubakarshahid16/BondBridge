@@ -267,6 +267,7 @@ function createInitialState() {
     theme: "dark",
     verifyStep: "profile",
     proofFormOpen: false,
+    storyViewerOpen: false,
     selectedChat: "",
     currentMeetIndex: 0,
     meetMode: "preview",
@@ -827,16 +828,32 @@ function renderInstaStories() {
     })),
   ];
 
+  const hasStory = Boolean(state.currentUser.story);
+
   return `
     <article class="story-tray">
-      <label class="story-bubble upload-story" title="Add story photo">
-        <input id="story-upload" type="file" accept="image/*" />
-        <span class="story-ring">
-          <span>${storyMediaNode()}</span>
-        </span>
-        <strong>Your story</strong>
-        <small>${state.currentUser.story ? "Live" : "Add photo"}</small>
-      </label>
+      ${
+        hasStory
+          ? `
+            <button class="story-bubble" data-action="toggle-story-viewer" title="View your story">
+              <span class="story-ring">
+                <span>${storyMediaNode()}</span>
+              </span>
+              <strong>Your story</strong>
+              <small>Live</small>
+            </button>
+          `
+          : `
+            <label class="story-bubble upload-story" title="Add story photo">
+              <input id="story-upload" type="file" accept="image/*" />
+              <span class="story-ring">
+                <span>${storyMediaNode()}</span>
+              </span>
+              <strong>Your story</strong>
+              <small>Add photo</small>
+            </label>
+          `
+      }
       ${storyItems
         .map(
           (story) => `
@@ -850,6 +867,30 @@ function renderInstaStories() {
           `,
         )
         .join("")}
+    </article>
+    ${hasStory && state.storyViewerOpen ? renderStoryViewer() : ""}
+  `;
+}
+
+function renderStoryViewer() {
+  const story = state.currentUser.story;
+  return `
+    <article class="card pad story-viewer">
+      <div class="step-heading">
+        <div>
+          <p class="eyebrow">Your story</p>
+          <h2 class="section-title">${escapeHtml(story.name || "Story photo")}</h2>
+        </div>
+        <button class="icon-button" data-action="toggle-story-viewer" title="Close">×</button>
+      </div>
+      <img class="story-photo-large" src="${escapeHtml(story.dataUrl)}" alt="Your story" />
+      <div class="verify-actions">
+        <label class="button primary" title="Replace photo">
+          ${icon("camera")}Replace photo
+          <input id="story-upload" type="file" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;" />
+        </label>
+        <button class="button" data-action="remove-story" title="Remove story">${icon("ban")}Remove story</button>
+      </div>
     </article>
   `;
 }
@@ -877,7 +918,7 @@ function renderMeetPost(profile, topMatch) {
         <div class="person">
           <div class="mini-ring"><span>${avatarNode(profile)}</span></div>
           <div>
-            <h3>bondbridge.verified</h3>
+            <h3>${escapeHtml(profile.name)}</h3>
             <p>${escapeHtml(profile.country)} - ${escapeHtml(profile.purposes[0])}</p>
           </div>
         </div>
@@ -4204,6 +4245,21 @@ document.addEventListener("click", async (event) => {
 
   if (action === "set-verify-step") {
     state.verifyStep = button.dataset.step || "profile";
+  }
+
+  if (action === "toggle-story-viewer") {
+    state.storyViewerOpen = !state.storyViewerOpen;
+    render();
+    return;
+  }
+
+  if (action === "remove-story") {
+    state.currentUser.story = null;
+    state.storyViewerOpen = false;
+    saveState();
+    toast("Story removed.");
+    render();
+    return;
   }
 
   if (action === "open-proof-form") {

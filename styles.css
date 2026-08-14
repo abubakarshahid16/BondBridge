@@ -1337,6 +1337,18 @@ button {
   object-fit: cover;
 }
 
+.story-viewer {
+  margin-top: 12px;
+}
+
+.story-photo-large {
+  width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  border-radius: 16px;
+  background: var(--panel-muted, rgba(127, 127, 127, 0.08));
+}
+
 .upload-story {
   cursor: pointer;
 }
