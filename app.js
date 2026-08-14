@@ -266,6 +266,7 @@ function createInitialState() {
     authTab: "login",
     theme: "dark",
     verifyStep: "profile",
+    proofFormOpen: false,
     selectedChat: "",
     currentMeetIndex: 0,
     meetMode: "preview",
@@ -1309,6 +1310,16 @@ function renderProfileStep(user) {
 }
 
 function renderProofStep(user) {
+  const roleStatus = user.verification.role || "unverified";
+  const hasSubmitted = user.proofQueue.length > 0;
+  const isVerified = roleStatus === "verified";
+  const isPending = roleStatus === "pending";
+  const isRejected = roleStatus === "rejected";
+  // Once something is waiting on review, hide the submit form by default so
+  // people don't resubmit the same proof five times thinking it's broken.
+  // "Submit different proof" reveals it again if they really need to.
+  const showForm = state.proofFormOpen || (!isPending && !isVerified);
+
   return `
     <article class="card pad verify-stage">
       <div class="step-heading">
@@ -1316,8 +1327,38 @@ function renderProofStep(user) {
           <p class="eyebrow">Step 2</p>
           <h2 class="section-title">${escapeHtml(user.role)} proof</h2>
         </div>
-        ${verificationBadge(user.verification.role)}
+        ${verificationBadge(roleStatus)}
       </div>
+
+      ${isVerified ? `
+        <div class="verify-welcome-banner">
+          <div class="verify-welcome-icon">✅</div>
+          <div>
+            <h3>You're verified</h3>
+            <p>Your ${escapeHtml((user.role || "role").toLowerCase())} proof was approved. Other people can see your verified badge now.</p>
+          </div>
+        </div>
+      ` : ""}
+
+      ${isPending ? `
+        <div class="verify-welcome-banner">
+          <div class="verify-welcome-icon">⏳</div>
+          <div>
+            <h3>Your proof is under review</h3>
+            <p>You submitted it successfully — nothing is broken. A person checks every submission by hand, so it can take a little while. You don't need to submit again; this page updates on its own the moment it's approved.</p>
+          </div>
+        </div>
+      ` : ""}
+
+      ${isRejected ? `
+        <div class="verify-welcome-banner">
+          <div class="verify-welcome-icon">⚠️</div>
+          <div>
+            <h3>Your last proof needs a fix</h3>
+            <p>It wasn't approved. Please submit a clearer document below — a full photo of a student ID or a university/work email screenshot works best.</p>
+          </div>
+        </div>
+      ` : ""}
 
       <div class="privacy-strip">
         ${icon("lock")}
@@ -1327,52 +1368,61 @@ function renderProofStep(user) {
         </div>
       </div>
 
-      <div class="verify-form proof-form">
-        <label class="upload-tile wide">
-          ${icon("file")}
-          <strong>Add proof file</strong>
-          <span>Student ID, transcript, university email screenshot, work proof, or LinkedIn evidence.</span>
-          <input id="proof-file" type="file" accept="image/*,.pdf,.doc,.docx" />
-        </label>
-        <label class="field">
-          <span>Proof type</span>
-          <select class="select" id="proof-type">
-            <option>University email</option>
-            <option>Student ID</option>
-            <option>Transcript</option>
-            <option>Enrollment letter</option>
-            <option>Work email</option>
-            <option>LinkedIn profile</option>
-            <option>Employment letter</option>
-          </select>
-        </label>
-        <label class="field">
-          <span>Reference note</span>
-          <input class="input" id="proof-note" placeholder="Example: myname@university.edu" />
-        </label>
-      </div>
+      ${showForm ? `
+        <div class="verify-form proof-form">
+          <label class="upload-tile wide">
+            ${icon("file")}
+            <strong>Add proof file</strong>
+            <span>Student ID, transcript, university email screenshot, work proof, or LinkedIn evidence.</span>
+            <input id="proof-file" type="file" accept="image/*,.pdf,.doc,.docx" />
+          </label>
+          <label class="field">
+            <span>Proof type</span>
+            <select class="select" id="proof-type">
+              <option>University email</option>
+              <option>Student ID</option>
+              <option>Transcript</option>
+              <option>Enrollment letter</option>
+              <option>Work email</option>
+              <option>LinkedIn profile</option>
+              <option>Employment letter</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Reference note</span>
+            <input class="input" id="proof-note" placeholder="Example: myname@university.edu" />
+          </label>
+        </div>
 
-      <div class="verify-actions">
-        <button class="button primary large" data-action="submit-proof" title="Submit proof">${icon("plus")}Submit proof</button>
-        <button class="button large" data-action="set-verify-step" data-step="safety" title="Continue to safety">Continue</button>
-      </div>
+        <div class="verify-actions">
+          <button class="button primary large" data-action="submit-proof" title="Submit proof">${icon("plus")}Submit proof</button>
+          <button class="button large" data-action="set-verify-step" data-step="safety" title="Continue to safety">Continue</button>
+        </div>
+      ` : `
+        <div class="verify-actions">
+          <button class="button large" data-action="open-proof-form" title="Submit different proof">${icon("file")}Submit different proof</button>
+          <button class="button large" data-action="set-verify-step" data-step="safety" title="Continue to safety">Continue</button>
+        </div>
+      `}
 
-      <div class="proof-list">
-        <h3>Recent submissions</h3>
-        ${user.proofQueue
-          .map(
-            (item) => `
-              <div class="proof-row">
-                <div>
-                  <strong>${escapeHtml(item.type)}</strong>
-                  <p class="small text-muted">${escapeHtml(item.detail)}</p>
+      ${hasSubmitted ? `
+        <div class="proof-list">
+          <h3>Your submissions</h3>
+          ${user.proofQueue
+            .map(
+              (item) => `
+                <div class="proof-row">
+                  <div>
+                    <strong>${escapeHtml(item.type)}</strong>
+                    <p class="small text-muted">${escapeHtml(item.detail)}</p>
+                  </div>
+                  ${verificationBadge(item.status)}
                 </div>
-                <span class="badge amber">${escapeHtml(item.status)}</span>
-              </div>
-            `,
-          )
-          .join("")}
-      </div>
+              `,
+            )
+            .join("")}
+        </div>
+      ` : ""}
     </article>
   `;
 }
@@ -2767,6 +2817,10 @@ async function submitProof() {
   const proofFile = document.querySelector("#proof-file")?.files?.[0];
   const note = getValue("proof-note");
   if (!requireSignedIn("submitting verification proof")) return;
+  if (!proofFile && !note) {
+    toast("Add a proof file or a reference note first.");
+    return;
+  }
   const detail = proofFile ? `${proofFile.name}${note ? ` - ${note}` : ""}` : note || "Reference submitted";
   let upload = null;
   try {
@@ -2798,7 +2852,8 @@ async function submitProof() {
   });
   state.proofDocuments = [row, ...state.proofDocuments].filter(Boolean);
   state.currentUser.verification.role = "pending";
-  toast("Proof queued for private review.");
+  state.proofFormOpen = false;
+  toast("Proof submitted. It's now waiting on manual review — you'll see this page update once it's checked.");
 }
 
 async function saveProfile() {
@@ -4149,6 +4204,10 @@ document.addEventListener("click", async (event) => {
 
   if (action === "set-verify-step") {
     state.verifyStep = button.dataset.step || "profile";
+  }
+
+  if (action === "open-proof-form") {
+    state.proofFormOpen = true;
   }
 
   if (action === "submit-proof") {
