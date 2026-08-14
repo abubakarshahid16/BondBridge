@@ -3274,8 +3274,13 @@ function buildSuggestions(relation, goal, tone, context) {
       `A short conversation may help us know each other better. No pressure if you prefer chat first.`,
     ],
   };
+  // These are the offline fallback (AI unreachable/timed out) — they need to
+  // read like something a person would actually send. A previous version
+  // glued the raw tone label onto the end of every line (e.g. "...respect
+  // that boundary. Tone: Direct but respectful.") which is exactly the kind
+  // of broken, robotic-looking output people were reporting.
   const selected = templates[goal] || templates["Start a respectful conversation"];
-  return selected.map((line) => `${line} Tone: ${tone}.`);
+  return selected;
 }
 
 // Loose sanity checks so "any file" can't be submitted as proof — this can't
