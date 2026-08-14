@@ -298,9 +298,25 @@ using (
   or (status = 'waiting' and guest_user_id is null and expires_at > now())
 );
 
+-- A call is only allowed between two people who already have an accepted
+-- connection — same rule as chat. Without this, anyone signed in could
+-- create a room inviting (and effectively calling) any other user id.
 create policy "Create video rooms as host"
 on public.webrtc_rooms for insert to authenticated
-with check (host_user_id = (select auth.uid()));
+with check (
+  host_user_id = (select auth.uid())
+  and (
+    guest_user_id is null
+    or exists (
+      select 1 from public.connections c
+      where c.status = 'accepted'
+        and (
+          (c.requester_id = host_user_id and c.recipient_id = guest_user_id)
+          or (c.requester_id = guest_user_id and c.recipient_id = host_user_id)
+        )
+    )
+  )
+);
 
 create policy "Update rooms you are part of or are joining"
 on public.webrtc_rooms for update to authenticated

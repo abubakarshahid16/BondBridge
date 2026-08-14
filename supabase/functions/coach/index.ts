@@ -5,6 +5,19 @@
 // burn the quota. This function keeps the key on the server. The browser calls
 // this function; only this function ever sees the key.
 //
+// This function does two things, chosen by `type` in the request body:
+//   - type: "coach" (default)       → writes respectful message suggestions
+//   - type: "verify-proof"          → looks at an uploaded proof photo and
+//                                      gives a first-pass opinion on whether
+//                                      it plausibly looks like the kind of
+//                                      document claimed (student ID, work
+//                                      email screenshot, etc). This is a
+//                                      SANITY CHECK, not a final decision —
+//                                      a human still reviews every submission.
+//                                      If the AI check fails or is unsure, we
+//                                      fail OPEN (don't block a real person's
+//                                      real document over an AI hiccup).
+//
 // SETUP (all in the Supabase dashboard, no terminal needed):
 //   1. Edge Functions → Create function → name it exactly: coach
 //   2. Paste this whole file as the function body → Deploy
@@ -14,7 +27,8 @@
 // Never commit the key itself to GitHub.
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-const MODEL = "llama-3.3-70b-versatile";
+const TEXT_MODEL = "llama-3.3-70b-versatile";
+const VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -35,11 +49,116 @@ Rules:
 - Respect that users are students and professionals from many cultures. Stay inclusive.
 - Prefer 2-3 short options over one long block when suggesting messages.`;
 
+const PROOF_SYSTEM_PROMPT = `You are a fast first-pass reviewer for a verification queue. You are
+shown one photo someone submitted as proof of being a student or professional, along with what
+type of document they claim it is. Your only job: does this photo plausibly look like that kind
+of real document (a student ID card, a transcript, an enrollment letter, a screenshot of a
+university/work email inbox or profile, a LinkedIn profile page, an employment letter) — as
+opposed to something unrelated (a random selfie, a meme, a blank/black image, a screenshot of
+something else entirely, an obvious drawing or AI-generated fake)?
+
+You are a quick sanity filter, not the final decision — a human reviews every submission
+afterward regardless of your answer. When genuinely unsure, lean toward plausible: true.
+
+Reply with ONLY compact JSON, no other text: {"plausible": true or false, "reason": "one short sentence"}`;
+
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
+}
+
+async function callGroq(apiKey: string, payload: Record<string, unknown>) {
+  const response = await fetch(GROQ_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    console.error("Groq error", response.status, detail.slice(0, 500));
+    throw new Error(`groq_${response.status}`);
+  }
+  return response.json();
+}
+
+async function handleCoach(apiKey: string, body: Record<string, unknown>) {
+  const prompt = String(body?.prompt ?? "").slice(0, 2000);
+  const context = String(body?.context ?? "").slice(0, 1000);
+
+  if (!prompt.trim()) {
+    return json({ ok: false, message: "Ask the coach a question first." }, 200);
+  }
+
+  try {
+    const data = await callGroq(apiKey, {
+      model: TEXT_MODEL,
+      temperature: 0.7,
+      max_tokens: 500,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        ...(context ? [{ role: "system", content: `Context about the person they're messaging: ${context}` }] : []),
+        { role: "user", content: prompt },
+      ],
+    });
+    const reply = data?.choices?.[0]?.message?.content?.trim() || "";
+    if (!reply) return json({ ok: false, message: "Coach had nothing to add. Try rephrasing." }, 200);
+    return json({ ok: true, reply });
+  } catch (error) {
+    console.error("Coach failure", error);
+    if (String(error).includes("429")) {
+      return json({ ok: false, message: "Coach is busy right now. Try again in a moment." }, 200);
+    }
+    return json({ ok: false, message: "Coach is unavailable right now." }, 200);
+  }
+}
+
+async function handleVerifyProof(apiKey: string, body: Record<string, unknown>) {
+  const imageUrl = String(body?.image_url ?? "").trim();
+  const documentType = String(body?.document_type ?? "document").slice(0, 60);
+  // Fail open: if there's nothing to look at, don't block the submission —
+  // just skip the AI check and let human review handle it.
+  if (!imageUrl) return json({ ok: true, plausible: true, reason: "Nothing to preview — sent for human review." });
+
+  try {
+    const data = await callGroq(apiKey, {
+      model: VISION_MODEL,
+      temperature: 0.2,
+      max_tokens: 150,
+      messages: [
+        { role: "system", content: PROOF_SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: `Claimed document type: ${documentType}` },
+            { type: "image_url", image_url: { url: imageUrl } },
+          ],
+        },
+      ],
+    });
+    const raw = data?.choices?.[0]?.message?.content?.trim() || "";
+    const cleaned = raw.replace(/```json|```/gi, "").trim();
+    let parsed: { plausible?: boolean; reason?: string } = {};
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch {
+      // Model didn't return clean JSON — fail open rather than block a real document.
+      return json({ ok: true, plausible: true, reason: "AI check inconclusive — sent for human review." });
+    }
+    return json({
+      ok: true,
+      plausible: parsed.plausible !== false,
+      reason: parsed.reason || "",
+    });
+  } catch (error) {
+    console.error("Proof check failure", error);
+    // Fail open — never let an AI hiccup block a genuine submission.
+    return json({ ok: true, plausible: true, reason: "AI check unavailable — sent for human review." });
+  }
 }
 
 Deno.serve(async (req: Request) => {
@@ -55,56 +174,15 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, message: "Coach is not configured yet." }, 200);
   }
 
-  let prompt = "";
-  let context = "";
+  let body: Record<string, unknown> = {};
   try {
-    const body = await req.json();
-    prompt = String(body?.prompt ?? "").slice(0, 2000);
-    context = String(body?.context ?? "").slice(0, 1000);
+    body = await req.json();
   } catch {
     return json({ ok: false, message: "Invalid request." }, 400);
   }
 
-  if (!prompt.trim()) {
-    return json({ ok: false, message: "Ask the coach a question first." }, 200);
+  if (body?.type === "verify-proof") {
+    return handleVerifyProof(apiKey, body);
   }
-
-  try {
-    const response = await fetch(GROQ_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        temperature: 0.7,
-        max_tokens: 500,
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          ...(context ? [{ role: "system", content: `Context about the person they're messaging: ${context}` }] : []),
-          { role: "user", content: prompt },
-        ],
-      }),
-    });
-
-    if (!response.ok) {
-      const detail = await response.text();
-      // Don't leak provider internals to the browser
-      console.error("Groq error", response.status, detail.slice(0, 500));
-      if (response.status === 429) {
-        return json({ ok: false, message: "Coach is busy right now. Try again in a moment." }, 200);
-      }
-      return json({ ok: false, message: "Coach is unavailable right now." }, 200);
-    }
-
-    const data = await response.json();
-    const reply = data?.choices?.[0]?.message?.content?.trim() || "";
-    if (!reply) return json({ ok: false, message: "Coach had nothing to add. Try rephrasing." }, 200);
-
-    return json({ ok: true, reply });
-  } catch (error) {
-    console.error("Coach failure", error);
-    return json({ ok: false, message: "Coach is unavailable right now." }, 200);
-  }
+  return handleCoach(apiKey, body);
 });

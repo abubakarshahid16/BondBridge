@@ -1495,7 +1495,7 @@ function renderProofStep(user) {
             ${icon("file")}
             <strong>Add proof file</strong>
             <span>Student ID, transcript, university email screenshot, work proof, or LinkedIn evidence.</span>
-            <input id="proof-file" type="file" accept="image/*,.pdf,.doc,.docx" />
+            <input id="proof-file" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf" />
           </label>
           <label class="field">
             <span>Proof type</span>
@@ -2256,10 +2256,14 @@ function renderPlanCard(name, label, detail, plan) {
 
 // ─── Landing / Welcome screen (shown when not signed in) ────────────────────
 function renderLanding() {
+  const installed = isStandaloneApp();
   return `
     <div class="landing-shell" data-theme="${escapeHtml(state.theme || "dark")}">
       <button class="landing-theme" data-action="toggle-theme" title="Switch theme">
         ${icon(state.theme === "dark" ? "sun" : "moon")}
+      </button>
+      <button class="landing-install ${installed ? "success" : ""}" data-action="install-pwa" title="${installed ? "App installed" : "Install app"}" ${installed ? "disabled" : ""}>
+        ${icon(installed ? "check" : "download")}<span>${installed ? "Installed" : "Install"}</span>
       </button>
 
       <div class="landing-hero">
@@ -2349,10 +2353,16 @@ function renderAuthPage() {
     `;
   }
 
+  const installed = isStandaloneApp();
   return `
     <div class="auth-fullpage">
       <div class="auth-fullpage-inner">
-        <button class="auth-back" data-action="go-landing">${icon("heart", true)} BondBridge</button>
+        <div class="auth-top-row">
+          <button class="auth-back" data-action="go-landing">${icon("heart", true)} BondBridge</button>
+          <button class="button ${installed ? "success" : ""} install-button" data-action="install-pwa" title="${installed ? "App installed" : "Install app"}" ${installed ? "disabled" : ""}>
+            ${icon(installed ? "check" : "download")}<span class="install-label">${installed ? "Installed" : "Install app"}</span>
+          </button>
+        </div>
 
         <div class="auth-tabs">
           <button class="auth-tab ${tab === "signup" ? "active" : ""}" data-action="auth-tab-signup">Create Account</button>
@@ -3147,6 +3157,74 @@ function buildSuggestions(relation, goal, tone, context) {
   return selected.map((line) => `${line} Tone: ${tone}.`);
 }
 
+// Loose sanity checks so "any file" can't be submitted as proof — this can't
+// prove a document is genuine, but it can catch the obvious cases (wrong file
+// type, a renamed text file, a blank/near-empty image) before they waste a
+// review slot. Real content review still happens via the AI pre-check below
+// plus a human.
+const PROOF_ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "application/pdf"];
+const PROOF_MIN_BYTES = 8 * 1024; // smaller than this is almost always a blank/placeholder file
+
+async function validateProofFile(file) {
+  if (!PROOF_ALLOWED_TYPES.includes(file.type)) {
+    throw new Error("Upload a photo (JPG/PNG) or PDF of your proof — that file type isn't accepted.");
+  }
+  if (file.size < PROOF_MIN_BYTES) {
+    throw new Error("That file looks empty or too small to be a real document. Try a clearer photo.");
+  }
+  if (file.type.startsWith("image/")) {
+    const dims = await imageDimensions(file).catch(() => null);
+    if (dims && (dims.width < 200 || dims.height < 200)) {
+      throw new Error("That image is too small to read. Upload a clearer, full-size photo.");
+    }
+  }
+}
+
+function imageDimensions(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve({ width: img.naturalWidth, height: img.naturalHeight });
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Could not read image."));
+    };
+    img.src = url;
+  });
+}
+
+// First-pass AI sanity check: does this actually look like the claimed proof
+// document? This never blocks submission by itself — a human always makes
+// the real call — it just warns the person immediately if something looks
+// obviously wrong (a selfie submitted as a "transcript", etc.) so they can
+// fix it right away instead of waiting days to find out.
+async function checkProofImage(dataUrl, documentType) {
+  const url = window.BONDBRIDGE_AI_URL || "";
+  const key = window.BONDBRIDGE_SUPABASE_KEY || "";
+  const token = authAccessToken || "";
+  if (!url || !key || !token || !dataUrl) return { plausible: true, reason: "" };
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, apikey: key },
+      body: JSON.stringify({ type: "verify-proof", image_url: dataUrl, document_type: documentType }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!response.ok) return { plausible: true, reason: "" };
+    const data = await response.json();
+    if (!data?.ok) return { plausible: true, reason: "" };
+    return { plausible: data.plausible !== false, reason: data.reason || "" };
+  } catch {
+    return { plausible: true, reason: "" };
+  }
+}
+
 async function submitProof() {
   const type = getValue("proof-type");
   const proofFile = document.querySelector("#proof-file")?.files?.[0];
@@ -3156,7 +3234,31 @@ async function submitProof() {
     toast("Add a proof file or a reference note first.");
     return;
   }
+  if (proofFile) {
+    try {
+      await validateProofFile(proofFile);
+    } catch (error) {
+      toast(error.message);
+      return;
+    }
+  }
   const detail = proofFile ? `${proofFile.name}${note ? ` - ${note}` : ""}` : note || "Reference submitted";
+
+  // Run the AI plausibility check on images before uploading — catch an
+  // obviously-wrong file early and let the person fix it immediately.
+  if (proofFile && proofFile.type.startsWith("image/")) {
+    try {
+      const previewDataUrl = await readFileAsDataUrl(proofFile);
+      const check = await checkProofImage(previewDataUrl, type);
+      if (!check.plausible) {
+        toast(`This doesn't look like a ${type.toLowerCase()}${check.reason ? ` — ${check.reason}` : ""}. Double-check the photo before submitting.`);
+        return;
+      }
+    } catch {
+      // AI check is best-effort — never block a real submission over it.
+    }
+  }
+
   let upload = null;
   try {
     if (proofFile) upload = await uploadFileToStorage("bondbridge-proofs", proofFile);
@@ -4009,6 +4111,15 @@ async function sbUploadFile(client, body) {
 async function sbCreateVideoRoom(client, body) {
   const user = await currentAuthUser(client);
   if (!user) return { ok: false, message: "Sign in to start a video call." };
+  // Calls only happen between people who are already connected — same rule
+  // as chat. The database enforces this too, but check here first so the
+  // person gets a clear message instead of a raw permission error.
+  if (body.guest_user_id) {
+    const connection = await sbFindConnection(client, body.guest_user_id);
+    if (!connection || connection.status !== "accepted") {
+      return { ok: false, message: "Send a connection request first — you can only call people you're connected with." };
+    }
+  }
   const insertRow = { host_user_id: user.id, purpose: body.purpose || "verified-intro" };
   if (body.guest_user_id) insertRow.guest_user_id = body.guest_user_id;
   const { data, error } = await client
