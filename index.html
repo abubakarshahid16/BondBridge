@@ -19,7 +19,11 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div id="app" class="app-shell"></div>
+    <!-- No class here on purpose: render() in app.js decides per-view whether
+         #app is a full-screen layout (landing/auth) or the app-shell grid.
+         Hardcoding "app-shell" here previously trapped the landing/auth
+         pages inside the grid's narrow center column on every screen size. -->
+    <div id="app"></div>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
     <!-- Supabase config. The publishable key is safe in public code —

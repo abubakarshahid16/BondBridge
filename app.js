@@ -583,6 +583,16 @@ function render() {
 
   app.dataset.view = state.view;
 
+  // `.app-shell` is the desktop/tablet grid layout (nav + feed + notification
+  // rail columns). Landing and auth are full-screen views with no sidebar —
+  // they must NOT carry that class, or their content gets squeezed into the
+  // narrow center grid column instead of filling the screen. This was
+  // hardcoded in index.html and never removed, which is why landing/auth
+  // rendered as a cramped column pinned to the left on real screens instead
+  // of centering and adapting to the viewport.
+  const isFullScreenView = state.view === "landing" || state.view === "auth";
+  app.classList.toggle("app-shell", !isFullScreenView);
+
   // Full-screen layouts (no sidebar/topbar)
   if (state.view === "landing") {
     app.innerHTML = renderLanding();
