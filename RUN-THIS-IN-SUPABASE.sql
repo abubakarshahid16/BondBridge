@@ -57,6 +57,11 @@ create table if not exists public.profiles (
   updated_at timestamptz not null default now()
 );
 
+-- Added later: lets a story photo actually persist to the database instead
+-- of only living in one browser's local storage.
+alter table public.profiles add column if not exists story_url text;
+alter table public.profiles add column if not exists story_updated_at timestamptz;
+
 create table if not exists public.verification_documents (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,

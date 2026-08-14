@@ -83,6 +83,17 @@ let screenShareStream = null;
 let installPromptEvent = null;
 let authAccessToken = "";
 
+// ─── Real WebRTC video calling (Supabase Realtime signaling, free STUN) ─────
+const RTC_CONFIG = {
+  iceServers: [
+    { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
+  ],
+};
+let callPeerConnection = null;
+let remoteVideoStream = null;
+let callSignalChannel = null;
+let seenCallSignalIds = new Set();
+
 const launchProviders = [
   {
     key: "authData",
@@ -268,6 +279,8 @@ function createInitialState() {
     verifyStep: "profile",
     proofFormOpen: false,
     storyViewerOpen: false,
+    call: null,
+    incomingCall: null,
     selectedChat: "",
     currentMeetIndex: 0,
     meetMode: "preview",
@@ -542,6 +555,11 @@ function applyProfileRowToCurrentUser(row) {
   state.currentUser.languages = Array.isArray(row.languages) ? row.languages.join(", ") : state.currentUser.languages;
   state.currentUser.purpose = Array.isArray(row.purposes) ? row.purposes.join(", ") : state.currentUser.purpose;
   state.currentUser.profilePhoto = row.profile_photo_url || state.currentUser.profilePhoto;
+  if (row.story_url) {
+    state.currentUser.story = { name: "story", dataUrl: row.story_url, createdAt: row.story_updated_at || "" };
+  } else if (row.story_url === null) {
+    state.currentUser.story = null;
+  }
   state.currentUser.verification = {
     identity: row.identity_status || state.currentUser.verification.identity,
     role: row.role_status || state.currentUser.verification.role,
@@ -612,12 +630,31 @@ function render() {
       ${renderView()}
     </main>
     ${renderCoachPanel()}
+    ${state.incomingCall ? renderIncomingCallBanner() : ""}
     <button class="floating-theme" data-action="toggle-theme" title="Switch ${state.theme === "dark" ? "light" : "dark"} mode">
       ${icon(state.theme === "dark" ? "sun" : "moon")}
       <span>${state.theme === "dark" ? "Light" : "Dark"}</span>
     </button>
   `;
   attachLocalVideo();
+  attachCallVideos();
+}
+
+function renderIncomingCallBanner() {
+  const invite = state.incomingCall;
+  return `
+    <div class="incoming-call-banner card pad">
+      <div class="mini-ring"><span>${icon("video")}</span></div>
+      <div>
+        <strong>${escapeHtml(invite.peerName)} is calling you</strong>
+        <p class="small text-muted">Real-time video call</p>
+      </div>
+      <div class="row wrap">
+        <button class="button success" data-action="accept-call" title="Accept call">${icon("check")}Accept</button>
+        <button class="button" data-action="decline-call" title="Decline call">${icon("ban")}Decline</button>
+      </div>
+    </div>
+  `;
 }
 
 function renderSidebar() {
@@ -719,8 +756,51 @@ function renderView() {
     launch: renderLaunch,
     privacy: renderPrivacy,
     settings: renderSettings,
+    call: renderCall,
   };
   return (renderers[state.view] || renderDashboard)();
+}
+
+function renderCall() {
+  const call = state.call;
+  if (!call) {
+    return `<div class="empty">No active call.</div>`;
+  }
+  const statusLabel = {
+    calling: `Calling ${escapeHtml(call.peerName || "them")}...`,
+    connecting: "Connecting...",
+    active: "Connected",
+  }[call.status] || "Connecting...";
+
+  return `
+    <section class="call-screen card pad">
+      <div class="step-heading">
+        <div>
+          <p class="eyebrow">Real-time video call</p>
+          <h2 class="section-title">${escapeHtml(call.peerName || "Call")}</h2>
+        </div>
+        <span class="badge ${call.status === "active" ? "green" : "amber"}">${statusLabel}</span>
+      </div>
+
+      <div class="live-video-grid">
+        <div class="live-video-tile stranger-tile ${call.status === "active" ? "active" : ""}">
+          ${call.status === "active" ? `<video id="call-remote-video" class="local-video-preview" autoplay playsinline></video>` : `<div class="empty">Waiting for ${escapeHtml(call.peerName || "the other person")} to join...</div>`}
+        </div>
+        <div class="live-video-tile self-tile">
+          <video id="call-self-video" class="local-video-preview" autoplay muted playsinline></video>
+          <div class="video-overlay">
+            <strong>You</strong>
+          </div>
+        </div>
+      </div>
+
+      <div class="meet-controls live-controls">
+        <button class="button danger" data-action="end-call" title="End call">${icon("ban")}End call</button>
+      </div>
+
+      <p class="small text-muted">Calls run browser-to-browser over WebRTC using a free STUN server. If either of you is behind a strict firewall or corporate wifi, the connection can fail — that's a known limit of the free tier, not a bug.</p>
+    </section>
+  `;
 }
 
 function renderDashboard() {
@@ -2698,6 +2778,220 @@ function stopMediaStreams() {
   screenShareStream = null;
 }
 
+function attachCallVideos() {
+  const selfNode = document.querySelector("#call-self-video");
+  if (selfNode && localVideoStream && selfNode.srcObject !== localVideoStream) {
+    selfNode.srcObject = localVideoStream;
+    selfNode.play().catch(() => {});
+  }
+  const remoteNode = document.querySelector("#call-remote-video");
+  if (remoteNode && remoteVideoStream && remoteNode.srcObject !== remoteVideoStream) {
+    remoteNode.srcObject = remoteVideoStream;
+    remoteNode.play().catch(() => {});
+  }
+}
+
+// Someone I'm connected with just called me. Show an accept/decline banner —
+// it renders globally so it works no matter which page I'm looking at.
+async function handleIncomingCall(room) {
+  if (!room || room.status !== "waiting" || state.call) return;
+  const client = getSupabase();
+  const peer = profileById(room.host_user_id);
+  state.incomingCall = {
+    roomId: room.id,
+    peerId: room.host_user_id,
+    peerName: peer?.name || "Someone you're connected with",
+  };
+  render();
+}
+
+async function acceptIncomingCall() {
+  const invite = state.incomingCall;
+  if (!invite) return;
+  state.incomingCall = null;
+  await beginCall({ roomId: invite.roomId, peerId: invite.peerId, peerName: invite.peerName, role: "guest" });
+}
+
+async function declineIncomingCall() {
+  const invite = state.incomingCall;
+  if (!invite) return;
+  state.incomingCall = null;
+  const client = getSupabase();
+  if (client) {
+    try {
+      await client.from("webrtc_rooms").update({ status: "ended" }).eq("id", invite.roomId);
+    } catch { /* best effort */ }
+  }
+  toast("Call declined.");
+  render();
+}
+
+// Caller side: create the room, invite the specific person, then join it myself.
+async function startCall(peerId, peerName) {
+  if (!requireSignedIn("starting a video call")) return;
+  if (!state.connections.includes(peerId)) {
+    toast("You can only call people you're connected with.");
+    return;
+  }
+  if (state.call) {
+    toast("You're already in a call.");
+    return;
+  }
+  const result = await apiJson("/api/video/room", {
+    method: "POST",
+    auth: true,
+    body: JSON.stringify({ purpose: "call", guest_user_id: peerId }),
+  });
+  if (!result.ok || !result.payload?.room?.id) {
+    toast(result.payload?.message || "Could not start the call. Try again.");
+    return;
+  }
+  await beginCall({ roomId: result.payload.room.id, peerId, peerName, role: "host" });
+}
+
+// Shared setup for both the caller and the person who accepted: get the
+// camera, open a peer connection, wire up signaling, show the call screen.
+async function beginCall({ roomId, peerId, peerName, role }) {
+  seenCallSignalIds = new Set();
+  state.call = { roomId, peerId, peerName, role, status: role === "host" ? "calling" : "connecting" };
+  state.view = "call";
+  saveState();
+  render();
+
+  const started = await startLocalVideo();
+  if (!started) {
+    await endCall(true);
+    return;
+  }
+
+  const client = getSupabase();
+  if (!client) {
+    toast("Can't reach BondBridge servers.");
+    await endCall(true);
+    return;
+  }
+
+  if (role === "guest") {
+    try {
+      await client.from("webrtc_rooms").update({ status: "active", guest_user_id: state.currentUser.id }).eq("id", roomId);
+    } catch { /* best effort — RLS will reject if not allowed */ }
+  }
+
+  callPeerConnection = new RTCPeerConnection(RTC_CONFIG);
+  localVideoStream.getTracks().forEach((track) => callPeerConnection.addTrack(track, localVideoStream));
+
+  callPeerConnection.ontrack = (event) => {
+    remoteVideoStream = event.streams[0];
+    if (state.call) state.call.status = "active";
+    render();
+  };
+
+  callPeerConnection.onicecandidate = (event) => {
+    if (event.candidate) sendCallSignal("ice", event.candidate.toJSON());
+  };
+
+  callPeerConnection.onconnectionstatechange = () => {
+    if (!callPeerConnection) return;
+    if (["failed", "disconnected", "closed"].includes(callPeerConnection.connectionState) && state.call) {
+      toast("Call connection lost.");
+      endCall(false);
+    }
+  };
+
+  // Catch up on any signal that arrived before we subscribed, then keep
+  // listening for new ones for the rest of the call.
+  const existing = await apiJson(`/api/video/signals?room_id=${encodeURIComponent(roomId)}`, { auth: true });
+  if (existing.ok) {
+    for (const signal of existing.payload?.signals || []) {
+      await handleCallSignal(signal);
+    }
+  }
+
+  callSignalChannel = client
+    .channel(`bondbridge-call-${roomId}`)
+    .on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "webrtc_signals", filter: `room_id=eq.${roomId}` },
+      (payload) => handleCallSignal(payload.new).catch(() => {}),
+    )
+    .subscribe();
+
+  if (role === "host") {
+    const offer = await callPeerConnection.createOffer();
+    await callPeerConnection.setLocalDescription(offer);
+    sendCallSignal("offer", { type: offer.type, sdp: offer.sdp });
+  }
+}
+
+async function sendCallSignal(signalType, payload) {
+  if (!state.call) return;
+  await apiJson("/api/video/signal", {
+    method: "POST",
+    auth: true,
+    body: JSON.stringify({
+      room_id: state.call.roomId,
+      recipient_id: state.call.peerId,
+      signal_type: signalType,
+      payload,
+    }),
+  });
+}
+
+async function handleCallSignal(signal) {
+  if (!signal || !callPeerConnection || !state.call) return;
+  if (signal.room_id !== state.call.roomId) return;
+  if (signal.sender_id === state.currentUser.id) return;
+  if (seenCallSignalIds.has(signal.id)) return;
+  seenCallSignalIds.add(signal.id);
+
+  if (signal.signal_type === "offer") {
+    await callPeerConnection.setRemoteDescription(new RTCSessionDescription(signal.payload));
+    const answer = await callPeerConnection.createAnswer();
+    await callPeerConnection.setLocalDescription(answer);
+    sendCallSignal("answer", { type: answer.type, sdp: answer.sdp });
+    if (state.call) state.call.status = "connecting";
+    render();
+  } else if (signal.signal_type === "answer") {
+    await callPeerConnection.setRemoteDescription(new RTCSessionDescription(signal.payload));
+    if (state.call) state.call.status = "connecting";
+    render();
+  } else if (signal.signal_type === "ice") {
+    try {
+      await callPeerConnection.addIceCandidate(new RTCIceCandidate(signal.payload));
+    } catch { /* candidates can arrive slightly out of order — safe to ignore */ }
+  } else if (signal.signal_type === "leave") {
+    toast(`${state.call.peerName || "The other person"} left the call.`);
+    await endCall(false);
+  }
+}
+
+async function endCall(notifyPeer) {
+  const activeCall = state.call;
+  if (notifyPeer && activeCall) {
+    try {
+      await sendCallSignal("leave", {});
+      const client = getSupabase();
+      if (client) await client.from("webrtc_rooms").update({ status: "ended" }).eq("id", activeCall.roomId);
+    } catch { /* best effort */ }
+  }
+  if (callSignalChannel) {
+    const client = getSupabase();
+    if (client) { try { client.removeChannel(callSignalChannel); } catch { /* ignore */ } }
+    callSignalChannel = null;
+  }
+  if (callPeerConnection) {
+    try { callPeerConnection.close(); } catch { /* ignore */ }
+    callPeerConnection = null;
+  }
+  stopMediaStreams();
+  remoteVideoStream = null;
+  state.call = null;
+  if (state.view === "call") state.view = activeCall?.peerId ? "chat" : "dashboard";
+  if (activeCall?.peerId) state.selectedChat = activeCall.peerId;
+  saveState();
+  render();
+}
+
 function isStandaloneApp() {
   return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
 }
@@ -3342,6 +3636,10 @@ async function supabaseRoute(client, rawPath, method, body) {
     case "POST /api/proof":                return sbAddProof(client, body);
     case "POST /api/storage/upload":       return sbUploadFile(client, body);
     case "POST /api/video/room":           return sbCreateVideoRoom(client, body);
+    case "POST /api/video/room/join":      return sbJoinVideoRoom(client, body);
+    case "POST /api/video/signal":         return sbSendVideoSignal(client, body);
+    case "GET /api/video/signals":         return sbListVideoSignals(client, params.get("room_id"));
+    case "POST /api/story":                return sbSetStory(client, body);
     case "POST /api/moderate":
       return { ok: true, allowed: !hasAbuse(body.text || ""), provider: "on-device" };
     case "POST /api/identity/session":
@@ -3711,13 +4009,67 @@ async function sbUploadFile(client, body) {
 async function sbCreateVideoRoom(client, body) {
   const user = await currentAuthUser(client);
   if (!user) return { ok: false, message: "Sign in to start a video call." };
+  const insertRow = { host_user_id: user.id, purpose: body.purpose || "verified-intro" };
+  if (body.guest_user_id) insertRow.guest_user_id = body.guest_user_id;
   const { data, error } = await client
     .from("webrtc_rooms")
-    .insert({ host_user_id: user.id, purpose: body.purpose || "verified-intro" })
+    .insert(insertRow)
     .select()
     .maybeSingle();
   if (error) return { ok: false, message: error.message };
   return { ok: true, room: data, room_code: data?.room_code || "" };
+}
+
+async function sbJoinVideoRoom(client, body) {
+  const user = await currentAuthUser(client);
+  if (!user) return { ok: false, message: "Sign in to join this call." };
+  const update = { status: body.status || "active", updated_at: new Date().toISOString() };
+  // Whoever accepts an open call becomes the guest if no guest is set yet.
+  if (body.claim_guest) update.guest_user_id = user.id;
+  const { data, error } = await client
+    .from("webrtc_rooms")
+    .update(update)
+    .eq("id", body.room_id)
+    .select()
+    .maybeSingle();
+  if (error) return { ok: false, message: error.message };
+  return { ok: true, room: data };
+}
+
+async function sbSendVideoSignal(client, body) {
+  const user = await currentAuthUser(client);
+  if (!user) return { ok: false, message: "You're signed out." };
+  const { error } = await client.from("webrtc_signals").insert({
+    room_id: body.room_id,
+    sender_id: user.id,
+    recipient_id: body.recipient_id || null,
+    signal_type: body.signal_type,
+    payload: body.payload || {},
+  });
+  if (error) return { ok: false, message: error.message };
+  return { ok: true };
+}
+
+async function sbListVideoSignals(client, roomId) {
+  if (!roomId) return { ok: false, message: "Missing room id." };
+  const { data, error } = await client
+    .from("webrtc_signals")
+    .select("*")
+    .eq("room_id", roomId)
+    .order("created_at", { ascending: true });
+  if (error) return { ok: false, message: error.message };
+  return { ok: true, signals: data || [] };
+}
+
+async function sbSetStory(client, body) {
+  const user = await currentAuthUser(client);
+  if (!user) return { ok: false, message: "You're signed out." };
+  const { error } = await client
+    .from("profiles")
+    .update({ story_url: body.story_url || null, story_updated_at: new Date().toISOString() })
+    .eq("id", user.id);
+  if (error) return { ok: false, message: error.message };
+  return { ok: true };
 }
 
 function setLaunchResult(title, message, payload) {
@@ -4193,6 +4545,8 @@ document.addEventListener("click", async (event) => {
     return;
   }
   if (action === "auth-logout") {
+    if (state.call) await endCall(true);
+    state.incomingCall = null;
     stopRealtime();
     const client = getSupabase();
     if (client) {
@@ -4259,6 +4613,9 @@ document.addEventListener("click", async (event) => {
     saveState();
     toast("Story removed.");
     render();
+    if (isSignedIn()) {
+      apiJson("/api/story", { method: "POST", auth: true, body: JSON.stringify({ story_url: null }) }).catch(() => {});
+    }
     return;
   }
 
@@ -4294,10 +4651,16 @@ document.addEventListener("click", async (event) => {
   if (action === "start-lounge") {
     const profile = profileById(id);
     if (profile) {
+      // Already connected → a real, two-way video call with this specific person.
+      if (state.connections.includes(profile.id)) {
+        await startCall(profile.id, profile.name);
+        return;
+      }
+      // Not connected yet — this can only preview your own camera; there's
+      // no one on the other end to call until you're both connected.
       state.meetMode = "live";
       state.view = "discover";
-      state.moderationLog.unshift(`Verified intro started with ${profile.name}.`);
-      toast(`Verified intro started with ${profile.name}.`);
+      toast(`This is a camera preview. Connect with ${profile.name} first to start a real call.`);
       saveState();
       render();
       const started = await startLocalVideo();
@@ -4375,9 +4738,24 @@ document.addEventListener("click", async (event) => {
   if (action === "request-call") {
     const profile = profileById(id);
     if (profile) {
-      state.moderationLog.unshift(`Call consent requested with ${profile.name}.`);
-      toast("Call request sent. The other person must approve first.");
+      await startCall(profile.id, profile.name);
+      return;
     }
+  }
+
+  if (action === "accept-call") {
+    await acceptIncomingCall();
+    return;
+  }
+
+  if (action === "decline-call") {
+    await declineIncomingCall();
+    return;
+  }
+
+  if (action === "end-call") {
+    await endCall(true);
+    return;
   }
 
   if (action === "request-screen") {
@@ -4505,7 +4883,7 @@ document.addEventListener("click", async (event) => {
   render();
 });
 
-document.addEventListener("change", (event) => {
+document.addEventListener("change", async (event) => {
   if (event.target.id === "profile-photo-input") {
     const file = event.target.files && event.target.files[0];
     if (!file) return;
@@ -4521,16 +4899,40 @@ document.addEventListener("change", (event) => {
   if (event.target.id === "story-upload") {
     const file = event.target.files && event.target.files[0];
     if (!file) return;
-    readFileAsDataUrl(file).then((dataUrl) => {
-      state.currentUser.story = {
-        name: file.name,
-        dataUrl,
-        createdAt: nowTime(),
-      };
+    let dataUrl;
+    try {
+      dataUrl = await readFileAsDataUrl(file);
+    } catch {
+      toast("Could not read that photo. Try another one.");
+      return;
+    }
+    // Show it immediately so the app never feels stuck while it uploads.
+    state.currentUser.story = { name: file.name, dataUrl, createdAt: nowTime() };
+    state.storyViewerOpen = false;
+    render();
+
+    if (!isSignedIn()) {
+      toast("Story added on this device. Sign up to keep it across sessions.");
+      return;
+    }
+
+    try {
+      const upload = await uploadFileToStorage("bondbridge-avatars", file);
+      const publicUrl = upload?.public_url;
+      if (!publicUrl) throw new Error("Upload did not return a link.");
+      const saved = await apiJson("/api/story", {
+        method: "POST",
+        auth: true,
+        body: JSON.stringify({ story_url: publicUrl }),
+      });
+      if (!saved.ok) throw new Error(saved.payload?.message || "Could not save your story.");
+      state.currentUser.story = { name: file.name, dataUrl: publicUrl, createdAt: nowTime() };
       saveState();
       toast("Story added.");
       render();
-    });
+    } catch (error) {
+      toast(error.message || "Story saved on this device only — it didn't sync.");
+    }
     return;
   }
 
@@ -4587,6 +4989,14 @@ function startRealtime() {
     .on("postgres_changes", { event: "*", schema: "public", table: "connections" }, () => {
       handleConnectionChange().catch(() => {});
     })
+    // A connection is calling me → show accept/decline
+    .on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "webrtc_rooms", filter: `guest_user_id=eq.${state.currentUser.id}` },
+      (payload) => {
+        handleIncomingCall(payload.new).catch(() => {});
+      },
+    )
     .subscribe();
 }
 

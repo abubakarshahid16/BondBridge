@@ -2815,6 +2815,30 @@ button {
   transform: translateY(0);
 }
 
+.incoming-call-banner {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: 420px;
+  width: calc(100% - 28px);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.28);
+  animation: incoming-call-pop 0.25s ease-out;
+}
+
+.incoming-call-banner strong {
+  display: block;
+}
+
+@keyframes incoming-call-pop {
+  from { opacity: 0; transform: translate(-50%, -12px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
 .floating-theme {
   position: fixed;
   top: 14px;
