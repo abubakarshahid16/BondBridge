@@ -393,6 +393,14 @@ function loadState() {
       auth: { ...defaults.auth, ...(saved.auth || {}) },
       guestMode: saved.guestMode || false,
       authTab: saved.authTab || "login",
+      // A call/incoming-call never survives a reload (the actual camera
+      // stream and peer connection are gone) — but the state WAS still being
+      // saved to localStorage. If someone closed the tab mid-call, that
+      // leftover object would come back on next load and silently block
+      // every future call forever (both starting one and being notified of
+      // one) since the code treats "state.call is set" as "already busy".
+      call: null,
+      incomingCall: null,
     };
   } catch {
     return defaults;
@@ -450,6 +458,20 @@ function avatarNode(person, className = "") {
     return `<img class="avatar-photo ${escapeHtml(className)}" src="${escapeHtml(photo)}" alt="${escapeHtml(displayName(person.name))}" />`;
   }
   return `<div class="avatar ${color} ${escapeHtml(className)}">${escapeHtml(initials(person.name))}</div>`;
+}
+
+function timeAgo(isoString) {
+  const then = new Date(isoString).getTime();
+  if (Number.isNaN(then)) return "Just now";
+  const seconds = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (seconds < 45) return "Just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(isoString).toLocaleDateString();
 }
 
 function storyMediaNode() {
@@ -954,24 +976,32 @@ function renderInstaStories() {
 
 function renderStoryViewer() {
   const story = state.currentUser.story;
+  const postedLabel = story.createdAt ? timeAgo(story.createdAt) : "Just now";
   return `
-    <article class="card pad story-viewer">
-      <div class="step-heading">
-        <div>
-          <p class="eyebrow">Your story</p>
-          <h2 class="section-title">${escapeHtml(story.name || "Story photo")}</h2>
+    <div class="story-viewer-backdrop" data-action="toggle-story-viewer">
+      <article class="story-viewer" data-stop-close>
+        <header class="story-viewer-head">
+          <div class="story-viewer-who">
+            <span class="story-viewer-avatar">${avatarNode(state.currentUser)}</span>
+            <div>
+              <strong>${escapeHtml(state.currentUser.name || "Your story")}</strong>
+              <small>${escapeHtml(postedLabel)}</small>
+            </div>
+          </div>
+          <button class="icon-button" data-action="toggle-story-viewer" title="Close">×</button>
+        </header>
+        <div class="story-viewer-frame">
+          <img class="story-photo-large" src="${escapeHtml(story.dataUrl)}" alt="Your story" />
         </div>
-        <button class="icon-button" data-action="toggle-story-viewer" title="Close">×</button>
-      </div>
-      <img class="story-photo-large" src="${escapeHtml(story.dataUrl)}" alt="Your story" />
-      <div class="verify-actions">
-        <label class="button primary" title="Replace photo">
-          ${icon("camera")}Replace photo
-          <input id="story-upload" type="file" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;" />
-        </label>
-        <button class="button" data-action="remove-story" title="Remove story">${icon("ban")}Remove story</button>
-      </div>
-    </article>
+        <div class="verify-actions">
+          <label class="button primary" title="Replace photo">
+            ${icon("camera")}Replace photo
+            <input id="story-upload" type="file" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;" />
+          </label>
+          <button class="button" data-action="remove-story" title="Remove story">${icon("ban")}Remove story</button>
+        </div>
+      </article>
+    </div>
   `;
 }
 
@@ -4510,6 +4540,7 @@ async function signupAccount() {
     toast(`Welcome to BondBridge, ${state.currentUser.name.split(" ")[0]}! Complete your profile to get verified.`);
     state.view = "verify";
     state.verifyStep = "profile";
+    startRealtime();
     await refreshSignedInData(false);
   } else {
     const msg = result.payload?.message || "";
@@ -4552,6 +4583,7 @@ async function loginAccount() {
     const name = state.currentUser.name ? state.currentUser.name.split(" ")[0] : "back";
     toast(`Welcome back, ${name}!`);
     state.view = "dashboard";
+    startRealtime();
     await refreshSignedInData(false);
   } else {
     const msg = result.payload?.message || "";
@@ -4608,6 +4640,14 @@ function selectFreePlan(plan) {
 }
 
 document.addEventListener("click", async (event) => {
+  // Story viewer: clicking the dark backdrop (not the card itself) closes it.
+  if (event.target.classList && event.target.classList.contains("story-viewer-backdrop")) {
+    state.storyViewerOpen = false;
+    saveState();
+    render();
+    return;
+  }
+
   const button = event.target.closest("button");
   if (!button) return;
 

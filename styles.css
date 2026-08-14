@@ -1337,16 +1337,96 @@ button {
   object-fit: cover;
 }
 
+.story-viewer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(6, 8, 14, 0.86);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: story-backdrop-fade 0.15s ease-out;
+}
+
+@keyframes story-backdrop-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 .story-viewer {
-  margin-top: 12px;
+  width: 100%;
+  max-width: 420px;
+  background: var(--paper, #12141c);
+  border-radius: 20px;
+  padding: 14px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: story-card-pop 0.18s ease-out;
+}
+
+@keyframes story-card-pop {
+  from { transform: scale(0.96); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.story-viewer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.story-viewer-who {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.story-viewer-avatar {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+}
+
+.story-viewer-avatar .avatar,
+.story-viewer-avatar .avatar-photo {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+}
+
+.story-viewer-who strong {
+  display: block;
+  font-size: 0.95rem;
+  line-height: 1.25;
+}
+
+.story-viewer-who small {
+  display: block;
+  color: var(--muted, #8b8f9c);
+  font-size: 0.78rem;
+}
+
+.story-viewer-frame {
+  border-radius: 16px;
+  overflow: hidden;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .story-photo-large {
   width: 100%;
-  max-height: 420px;
+  max-height: 65vh;
   object-fit: contain;
   border-radius: 16px;
-  background: var(--panel-muted, rgba(127, 127, 127, 0.08));
+  background: #000;
 }
 
 .upload-story {
