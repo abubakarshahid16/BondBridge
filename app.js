@@ -250,11 +250,11 @@ async function subscribeToPush() {
 // open — a fully closed browser/app needs native push, which a plain PWA
 // on a free plan can't do without a push server, so this is the practical
 // ceiling for "ring outside the app" here.
-function notifyIncomingCall(peerName) {
+function notifyIncomingCall(peerName, mode = "video") {
   try {
     if (!("Notification" in window)) return;
     if (Notification.permission === "granted") {
-      const note = new Notification("Incoming BondBridge call", {
+      const note = new Notification(mode === "voice" ? "Incoming BondBridge voice call" : "Incoming BondBridge call", {
         body: `${peerName || "Someone you're connected with"} is calling you.`,
         icon: "./icon.svg",
         tag: "bondbridge-incoming-call",
@@ -889,12 +889,13 @@ function renderCallErrorBanner() {
 
 function renderIncomingCallBanner() {
   const invite = state.incomingCall;
+  const isVoice = invite.mode === "voice";
   return `
     <div class="incoming-call-banner card pad">
-      <div class="mini-ring"><span>${icon("video")}</span></div>
+      <div class="mini-ring"><span>${icon(isVoice ? "phone" : "video")}</span></div>
       <div>
         <strong>${escapeHtml(invite.peerName)} is calling you</strong>
-        <p class="small text-muted">Real-time video call</p>
+        <p class="small text-muted">${isVoice ? "Real-time voice call" : "Real-time video call"}</p>
       </div>
       <div class="row wrap">
         <button class="button success" data-action="accept-call" title="Accept call">${icon("check")}Accept</button>
@@ -1022,6 +1023,7 @@ function renderCall() {
   if (!call) {
     return `<div class="empty">No active call.</div>`;
   }
+  const isVoice = call.mode === "voice";
   const statusLabel = {
     calling: `Calling ${escapeHtml(call.peerName || "them")}...`,
     connecting: "Connecting...",
@@ -1032,23 +1034,36 @@ function renderCall() {
     <section class="call-screen card pad">
       <div class="step-heading">
         <div>
-          <p class="eyebrow">Real-time video call</p>
+          <p class="eyebrow">${isVoice ? "Real-time voice call" : "Real-time video call"}</p>
           <h2 class="section-title">${escapeHtml(call.peerName || "Call")}</h2>
         </div>
         <span class="badge ${call.status === "active" ? "green" : "amber"}">${statusLabel}</span>
       </div>
 
-      <div class="live-video-grid">
-        <div class="live-video-tile stranger-tile ${call.status === "active" ? "active" : ""}">
-          ${call.status === "active" ? `<video id="call-remote-video" class="local-video-preview" autoplay playsinline></video>` : `<div class="empty">Waiting for ${escapeHtml(call.peerName || "the other person")} to join...</div>`}
-        </div>
-        <div class="live-video-tile self-tile">
-          <video id="call-self-video" class="local-video-preview" autoplay muted playsinline></video>
-          <div class="video-overlay">
-            <strong>You</strong>
-          </div>
-        </div>
-      </div>
+      ${
+        isVoice
+          ? `
+            <div class="voice-call-face">
+              <div class="voice-call-avatar ${call.status === "active" ? "active" : ""}">${avatarNode(profileById(call.peerId) || { name: call.peerName }, "big")}</div>
+              <p class="text-muted small">${call.status === "active" ? "Audio connected — no camera is used on this call." : `Waiting for ${escapeHtml(call.peerName || "the other person")} to join...`}</p>
+              <audio id="call-remote-video" autoplay playsinline></audio>
+              <audio id="call-self-video" autoplay muted playsinline></audio>
+            </div>
+          `
+          : `
+            <div class="live-video-grid">
+              <div class="live-video-tile stranger-tile ${call.status === "active" ? "active" : ""}">
+                ${call.status === "active" ? `<video id="call-remote-video" class="local-video-preview" autoplay playsinline></video>` : `<div class="empty">Waiting for ${escapeHtml(call.peerName || "the other person")} to join...</div>`}
+              </div>
+              <div class="live-video-tile self-tile">
+                <video id="call-self-video" class="local-video-preview" autoplay muted playsinline></video>
+                <div class="video-overlay">
+                  <strong>You</strong>
+                </div>
+              </div>
+            </div>
+          `
+      }
 
       <div class="meet-controls live-controls">
         <button class="button danger" data-action="end-call" title="End call">${icon("ban")}End call</button>
@@ -2016,7 +2031,8 @@ function renderProfileCard(profile) {
             // it earlier looked like you could call a stranger directly,
             // which is exactly what caused real confusion in testing.
             connected
-              ? `<button class="icon-button" data-action="start-lounge" data-id="${profile.id}" title="Video call ${escapeHtml(profile.name)}">${icon("video")}</button>`
+              ? `<button class="icon-button" data-action="request-call" data-id="${profile.id}" title="Voice call ${escapeHtml(profile.name)}">${icon("phone")}</button>
+                 <button class="icon-button" data-action="start-lounge" data-id="${profile.id}" title="Video call ${escapeHtml(profile.name)}">${icon("video")}</button>`
               : ""
           }
           ${action}
@@ -2190,7 +2206,8 @@ function renderThread(profile) {
           </div>
         </div>
         <div class="chat-actions">
-          <button class="icon-button" data-action="request-call" data-id="${profile.id}" title="Request call">${icon("phone")}</button>
+          <button class="icon-button" data-action="request-call" data-id="${profile.id}" title="Voice call ${escapeHtml(profile.name)}">${icon("phone")}</button>
+          <button class="icon-button" data-action="request-video-call" data-id="${profile.id}" title="Video call ${escapeHtml(profile.name)}">${icon("video")}</button>
           <button class="icon-button" data-action="request-screen" data-id="${profile.id}" title="Request screen share consent">${icon("database")}</button>
           <button class="icon-button" data-action="report-profile" data-id="${profile.id}" title="Report conversation">${icon("flag")}</button>
         </div>
@@ -3051,27 +3068,31 @@ function attachLocalVideo() {
 // Returns { ok, reason }. `reason` is a specific, plain-language explanation
 // (not just "it failed") so a failed call can tell the user exactly what to
 // do next instead of silently vanishing back to the dashboard.
-async function startLocalVideo() {
+// `mode: "voice"` skips the camera entirely and only asks for the
+// microphone — for people who want a plain phone-style call without
+// turning their camera on.
+async function startLocalVideo(mode = "video") {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    return { ok: false, reason: "This browser does not support camera access. Try a recent version of Chrome, Safari, or Edge." };
+    return { ok: false, reason: mode === "voice" ? "This browser does not support microphone access. Try a recent version of Chrome, Safari, or Edge." : "This browser does not support camera access. Try a recent version of Chrome, Safari, or Edge." };
   }
   try {
-    localVideoStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    localVideoStream = await navigator.mediaDevices.getUserMedia({ video: mode !== "voice", audio: true });
     attachLocalVideo();
     return { ok: true, reason: "" };
   } catch (error) {
     console.error("getUserMedia failed", error?.name, error?.message);
+    const device = mode === "voice" ? "microphone" : "camera or microphone";
     const reasons = {
-      NotAllowedError: "Camera & microphone access is blocked for BondBridge. Open your browser (or phone) settings, allow Camera and Microphone for BondBridge, then try the call again.",
-      PermissionDeniedError: "Camera & microphone access is blocked for BondBridge. Open your browser (or phone) settings, allow Camera and Microphone for BondBridge, then try the call again.",
-      NotFoundError: "No camera or microphone was found on this device.",
-      DevicesNotFoundError: "No camera or microphone was found on this device.",
-      NotReadableError: "Your camera or microphone is already being used by another app or browser tab. Close it and try the call again.",
-      TrackStartError: "Your camera or microphone is already being used by another app or browser tab. Close it and try the call again.",
-      OverconstrainedError: "Your camera doesn't support the settings this call needs.",
-      SecurityError: "Camera access is blocked on this page. Make sure you're using the official BondBridge site over a secure (https) connection.",
+      NotAllowedError: `${mode === "voice" ? "Microphone" : "Camera & microphone"} access is blocked for BondBridge. Open your browser (or phone) settings, allow ${mode === "voice" ? "Microphone" : "Camera and Microphone"} for BondBridge, then try the call again.`,
+      PermissionDeniedError: `${mode === "voice" ? "Microphone" : "Camera & microphone"} access is blocked for BondBridge. Open your browser (or phone) settings, allow ${mode === "voice" ? "Microphone" : "Camera and Microphone"} for BondBridge, then try the call again.`,
+      NotFoundError: `No ${device} was found on this device.`,
+      DevicesNotFoundError: `No ${device} was found on this device.`,
+      NotReadableError: `Your ${device} is already being used by another app or browser tab. Close it and try the call again.`,
+      TrackStartError: `Your ${device} is already being used by another app or browser tab. Close it and try the call again.`,
+      OverconstrainedError: "Your device doesn't support the settings this call needs.",
+      SecurityError: "Microphone/camera access is blocked on this page. Make sure you're using the official BondBridge site over a secure (https) connection.",
     };
-    const reason = reasons[error?.name] || "Could not access your camera or microphone. Check your permissions and try again.";
+    const reason = reasons[error?.name] || `Could not access your ${device}. Check your permissions and try again.`;
     return { ok: false, reason };
   }
 }
@@ -3122,13 +3143,15 @@ async function handleIncomingCall(room) {
   if (!room || room.status !== "waiting" || state.call) return;
   const peer = profileById(room.host_user_id);
   const peerName = peer?.name || "Someone you're connected with";
+  const mode = room.purpose === "voice-call" ? "voice" : "video";
   state.incomingCall = {
     roomId: room.id,
     peerId: room.host_user_id,
     peerName,
+    mode,
   };
   startRingtone();
-  notifyIncomingCall(peerName);
+  notifyIncomingCall(peerName, mode);
   // Auto-clear like a real phone: don't leave the banner (and ringtone)
   // running forever if nobody answers.
   if (incomingCallTimeoutId) clearTimeout(incomingCallTimeoutId);
@@ -3146,7 +3169,7 @@ async function acceptIncomingCall() {
   if (incomingCallTimeoutId) { clearTimeout(incomingCallTimeoutId); incomingCallTimeoutId = null; }
   stopRingtone();
   state.incomingCall = null;
-  await beginCall({ roomId: invite.roomId, peerId: invite.peerId, peerName: invite.peerName, role: "guest" });
+  await beginCall({ roomId: invite.roomId, peerId: invite.peerId, peerName: invite.peerName, role: "guest", mode: invite.mode });
 }
 
 async function declineIncomingCall(missed = false) {
@@ -3166,8 +3189,9 @@ async function declineIncomingCall(missed = false) {
 }
 
 // Caller side: create the room, invite the specific person, then join it myself.
-async function startCall(peerId, peerName) {
-  if (!requireSignedIn("starting a video call")) return;
+// `mode: "voice"` starts a plain audio call — no camera is requested at all.
+async function startCall(peerId, peerName, mode = "video") {
+  if (!requireSignedIn(mode === "voice" ? "starting a voice call" : "starting a video call")) return;
   if (!state.connections.includes(peerId)) {
     toast("You can only call people you're connected with.");
     return;
@@ -3179,25 +3203,26 @@ async function startCall(peerId, peerName) {
   const result = await apiJson("/api/video/room", {
     method: "POST",
     auth: true,
-    body: JSON.stringify({ purpose: "call", guest_user_id: peerId }),
+    body: JSON.stringify({ purpose: mode === "voice" ? "voice-call" : "call", guest_user_id: peerId }),
   });
   if (!result.ok || !result.payload?.room?.id) {
     toast(result.payload?.message || "Could not start the call. Try again.");
     return;
   }
-  await beginCall({ roomId: result.payload.room.id, peerId, peerName, role: "host" });
+  await beginCall({ roomId: result.payload.room.id, peerId, peerName, role: "host", mode });
 }
 
 // Shared setup for both the caller and the person who accepted: get the
-// camera, open a peer connection, wire up signaling, show the call screen.
-async function beginCall({ roomId, peerId, peerName, role }) {
+// camera (or just the mic for a voice call), open a peer connection, wire
+// up signaling, show the call screen.
+async function beginCall({ roomId, peerId, peerName, role, mode = "video" }) {
   seenCallSignalIds = new Set();
-  state.call = { roomId, peerId, peerName, role, status: role === "host" ? "calling" : "connecting" };
+  state.call = { roomId, peerId, peerName, role, mode, status: role === "host" ? "calling" : "connecting" };
   state.view = "call";
   saveState();
   render();
 
-  const started = await startLocalVideo();
+  const started = await startLocalVideo(mode);
   if (!started.ok) {
     await endCall(true);
     state.callError = started.reason;
@@ -5290,7 +5315,15 @@ document.addEventListener("click", async (event) => {
   if (action === "request-call") {
     const profile = profileById(id);
     if (profile) {
-      await startCall(profile.id, profile.name);
+      await startCall(profile.id, profile.name, "voice");
+      return;
+    }
+  }
+
+  if (action === "request-video-call") {
+    const profile = profileById(id);
+    if (profile) {
+      await startCall(profile.id, profile.name, "video");
       return;
     }
   }

@@ -1786,6 +1786,42 @@ button {
   text-align: center;
 }
 
+.voice-call-face {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 48px 16px;
+  text-align: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    radial-gradient(circle at top left, rgba(245, 133, 41, 0.18), transparent 30%),
+    radial-gradient(circle at bottom right, rgba(131, 58, 180, 0.2), transparent 34%),
+    #070707;
+}
+
+.voice-call-avatar {
+  width: 128px;
+  height: 128px;
+  border-radius: 50%;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--line);
+}
+
+.voice-call-avatar.active {
+  border-color: #22c55e;
+  box-shadow: 0 0 0 6px rgba(34, 197, 94, 0.14);
+}
+
+.voice-call-avatar img,
+.voice-call-avatar .avatar {
+  width: 100%;
+  height: 100%;
+}
+
 /* When there's no live video yet, the tile falls back to a fixed-size
    avatar photo/initials circle. It needs to be centered explicitly —
    inset:0 + margin:auto centers a fixed-size box reliably without
