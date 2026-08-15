@@ -401,6 +401,7 @@ function createInitialState() {
     storyViewerOpen: false,
     call: null,
     incomingCall: null,
+    callError: null,
     selectedChat: "",
     currentMeetIndex: 0,
     meetMode: "preview",
@@ -521,6 +522,7 @@ function loadState() {
       // one) since the code treats "state.call is set" as "already busy".
       call: null,
       incomingCall: null,
+      callError: null,
     };
   } catch {
     return defaults;
@@ -773,9 +775,30 @@ function render() {
     </main>
     ${renderCoachPanel()}
     ${state.incomingCall ? renderIncomingCallBanner() : ""}
+    ${state.callError ? renderCallErrorBanner() : ""}
   `;
   attachLocalVideo();
   attachCallVideos();
+}
+
+// A camera/microphone failure used to just flash the call screen for a
+// moment and fall back to a 2.4s toast — easy to miss entirely, which is
+// exactly why "the other person couldn't pick up" looked unexplained. This
+// banner stays on screen until the person taps it away, and says plainly
+// what went wrong and what to do about it.
+function renderCallErrorBanner() {
+  return `
+    <div class="incoming-call-banner card pad call-error-banner">
+      <div class="mini-ring warn"><span>${icon("ban")}</span></div>
+      <div>
+        <strong>Call couldn't connect</strong>
+        <p class="small text-muted">${escapeHtml(state.callError)}</p>
+      </div>
+      <div class="row wrap">
+        <button class="button" data-action="dismiss-call-error" title="Close">${icon("check")}Got it</button>
+      </div>
+    </div>
+  `;
 }
 
 function renderIncomingCallBanner() {
@@ -2891,19 +2914,31 @@ function attachLocalVideo() {
   }
 }
 
+// Returns { ok, reason }. `reason` is a specific, plain-language explanation
+// (not just "it failed") so a failed call can tell the user exactly what to
+// do next instead of silently vanishing back to the dashboard.
 async function startLocalVideo() {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    toast("This browser does not support camera access.");
-    return false;
+    return { ok: false, reason: "This browser does not support camera access. Try a recent version of Chrome, Safari, or Edge." };
   }
   try {
     localVideoStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
     attachLocalVideo();
-    toast("Camera and microphone connected for free WebRTC.");
-    return true;
+    return { ok: true, reason: "" };
   } catch (error) {
-    toast("Camera permission was not granted.");
-    return false;
+    console.error("getUserMedia failed", error?.name, error?.message);
+    const reasons = {
+      NotAllowedError: "Camera & microphone access is blocked for BondBridge. Open your browser (or phone) settings, allow Camera and Microphone for BondBridge, then try the call again.",
+      PermissionDeniedError: "Camera & microphone access is blocked for BondBridge. Open your browser (or phone) settings, allow Camera and Microphone for BondBridge, then try the call again.",
+      NotFoundError: "No camera or microphone was found on this device.",
+      DevicesNotFoundError: "No camera or microphone was found on this device.",
+      NotReadableError: "Your camera or microphone is already being used by another app or browser tab. Close it and try the call again.",
+      TrackStartError: "Your camera or microphone is already being used by another app or browser tab. Close it and try the call again.",
+      OverconstrainedError: "Your camera doesn't support the settings this call needs.",
+      SecurityError: "Camera access is blocked on this page. Make sure you're using the official BondBridge site over a secure (https) connection.",
+    };
+    const reason = reasons[error?.name] || "Could not access your camera or microphone. Check your permissions and try again.";
+    return { ok: false, reason };
   }
 }
 
@@ -3029,8 +3064,10 @@ async function beginCall({ roomId, peerId, peerName, role }) {
   render();
 
   const started = await startLocalVideo();
-  if (!started) {
+  if (!started.ok) {
     await endCall(true);
+    state.callError = started.reason;
+    render();
     return;
   }
 
@@ -4971,8 +5008,9 @@ document.addEventListener("click", async (event) => {
       saveState();
       render();
       const started = await startLocalVideo();
-      if (!started) {
+      if (!started.ok) {
         state.meetMode = "preview";
+        toast(started.reason);
         saveState();
         render();
       }
@@ -5057,6 +5095,12 @@ document.addEventListener("click", async (event) => {
 
   if (action === "decline-call") {
     await declineIncomingCall();
+    return;
+  }
+
+  if (action === "dismiss-call-error") {
+    state.callError = null;
+    render();
     return;
   }
 

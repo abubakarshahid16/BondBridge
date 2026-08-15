@@ -545,6 +545,14 @@ button {
   background: var(--grad);
 }
 
+.mini-ring.warn {
+  background: linear-gradient(135deg, #f59e0b, #dc2626);
+}
+
+.call-error-banner {
+  border: 1px solid rgba(220, 38, 38, 0.35);
+}
+
 .story-ring > span,
 .mini-ring > span {
   display: grid;
@@ -1743,8 +1751,6 @@ button {
 
 .live-video-tile {
   position: relative;
-  display: grid;
-  place-items: center;
   min-height: clamp(320px, 56dvh, 520px);
   overflow: hidden;
   border: 1px solid var(--line);
@@ -1753,6 +1759,15 @@ button {
     radial-gradient(circle at top left, rgba(245, 133, 41, 0.22), transparent 30%),
     radial-gradient(circle at bottom right, rgba(131, 58, 180, 0.26), transparent 34%),
     #070707;
+}
+
+.live-video-tile .empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  text-align: center;
 }
 
 .live-video-tile.self-tile {
