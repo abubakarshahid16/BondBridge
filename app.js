@@ -1351,7 +1351,7 @@ function renderSafetyPost(pendingRequests, accepted) {
         <div class="person">
           <div class="mini-ring"><span class="family-avatar">${icon("shield")}</span></div>
           <div>
-            <h3>safety.center</h3>
+            <h3>Safety Center</h3>
             <p>${pendingRequests} requests - ${accepted} connected</p>
           </div>
         </div>
