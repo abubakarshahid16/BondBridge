@@ -1461,6 +1461,12 @@ function renderMeetLounge(profile) {
   }
   const connected = state.connections.includes(profile.id);
   const live = state.meetMode === "live";
+  // A real two-way call only exists once you're connected AND actually in
+  // one (state.call set) — everything else here is just your own camera
+  // checking itself out next to a profile card. The labeling below must
+  // never claim "live"/"active" unless both of those are true, or it reads
+  // as if the other person can see/hear you when they can't.
+  const inRealCall = connected && Boolean(state.call);
   return `
     <article class="meet-live-shell">
       <div class="live-title-row">
@@ -1469,22 +1475,31 @@ function renderMeetLounge(profile) {
           <h2>Meet a respectful stranger</h2>
           <p>Short video intros with identity checks, report tools, and mutual request before private chat.</p>
         </div>
-        <span class="live-pill ${live ? "on" : ""}">${live ? "Live video" : "Preview mode"}</span>
+        <span class="live-pill ${inRealCall ? "on" : ""}">${inRealCall ? "Live video" : "Camera preview only"}</span>
       </div>
 
+      ${
+        live && !inRealCall
+          ? `<p class="text-muted small preview-disclaimer">
+              ${icon("info", true)}This is a preview of your own camera only — ${escapeHtml(profile.name)} can't see or hear you here.
+              ${connected ? `Open the chat and start a call to actually reach them.` : `Send a connection request to start a real call.`}
+            </p>`
+          : ""
+      }
+
       <div class="live-video-grid">
-        <div class="live-video-tile stranger-tile ${live ? "active" : ""}">
+        <div class="live-video-tile stranger-tile ${inRealCall ? "active" : ""}">
           ${avatarNode(profile, "big")}
           <div class="video-overlay">
             <strong>${escapeHtml(profile.name)}, ${profile.age}</strong>
-            <span>${escapeHtml(profile.country)} - ${escapeHtml(profile.field)}</span>
+            <span>${inRealCall ? `${escapeHtml(profile.country)} - ${escapeHtml(profile.field)}` : "Not connected — photo only"}</span>
           </div>
         </div>
         <div class="live-video-tile self-tile">
           ${live ? `<video id="self-video" class="local-video-preview" autoplay muted playsinline></video>` : avatarNode(state.currentUser, "big")}
           <div class="video-overlay">
             <strong>You</strong>
-            <span>${live ? "Camera and mic are browser-native" : state.currentUser.profilePhoto ? "Profile photo ready" : "Add profile photo"}</span>
+            <span>${live ? "Camera preview — only you can see this" : state.currentUser.profilePhoto ? "Profile photo ready" : "Add profile photo"}</span>
           </div>
         </div>
       </div>
@@ -1497,7 +1512,7 @@ function renderMeetLounge(profile) {
       </div>
 
       <div class="meet-controls live-controls">
-        <button class="button primary" data-action="start-lounge" data-id="${profile.id}" title="Start verified video">${icon("video")}${live ? "Video active" : "Start video"}</button>
+        <button class="button primary" data-action="start-lounge" data-id="${profile.id}" title="Preview your camera">${icon("video")}${live ? "Preview active" : "Start camera preview"}</button>
         <button class="button" data-action="end-lounge" title="End video">${icon("ban")}End</button>
         <button class="button" data-action="next-lounge" title="Next verified stranger">${icon("search")}Next</button>
         ${

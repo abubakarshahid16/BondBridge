@@ -1221,6 +1221,22 @@ button {
   line-height: 1.45;
 }
 
+.preview-disclaimer {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 0 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.preview-disclaimer .icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
 .stat {
   display: grid;
   gap: 8px;
