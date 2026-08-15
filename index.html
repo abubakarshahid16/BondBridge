@@ -37,6 +37,10 @@
       // a TURN provider API key is added as a secret. Falls back to
       // STUN-only automatically if that secret isn't set yet.
       window.BONDBRIDGE_TURN_URL = "https://fpbodwjgypxzqpstwcvo.supabase.co/functions/v1/coach";
+      // Public VAPID key for Web Push — safe to publish (it's the whole
+      // point of a "public" key). It lets this browser register for push
+      // notifications that keep working after the app/tab is closed.
+      window.BONDBRIDGE_VAPID_PUBLIC_KEY = "BIUVUzbmU8PWZk3geucsRCo_6L7tQRqSD2dajE3D6FLGG4EM9alp9mhHDvDTIsBLjAEHdZDiwzh173geQmmHnRo";
     </script>
     <!-- Bundled locally rather than loaded from a CDN, so the app still works
          if the CDN is blocked, slow, or down. -->

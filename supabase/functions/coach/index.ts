@@ -49,6 +49,28 @@ Rules:
 - Respect that users are students and professionals from many cultures. Stay inclusive.
 - Prefer 2-3 short options over one long block when suggesting messages.`;
 
+const REWRITE_SYSTEM_PROMPT = `You lightly polish a chat message someone is about to send to a new
+connection on a respectful dating/networking app, right before they hit send.
+
+Critical rules:
+- Keep the SAME language the person wrote in. If they wrote in Urdu, Roman Urdu (Urdu written in
+  English letters, e.g. "kesa ho", "thik hoon"), Hindi, or any mix of languages, your rewrite must
+  stay in that same language/mix. NEVER translate it into English. NEVER translate English into
+  another language either — just keep whatever language(s) they used.
+- Keep their original meaning, tone, and length as closely as possible. A short casual reply like
+  "kesa ho" (how are you) or "hey, good to meet you" is ALREADY respectful and friendly — for
+  messages like that, make only tiny fixes (spelling, obvious typos) or return it completely
+  unchanged. Do not add greetings, sign-offs, or filler sentences that were not implied by the
+  original message.
+- Only meaningfully rewrite the message if it actually contains something disrespectful,
+  aggressive, sexual, or pressuring — in that case, rephrase just that part into something
+  considerate while preserving everything else the person said.
+- Never add generic stock phrases like "I wanted to say this respectfully" or "I would appreciate
+  your thoughts whenever you are comfortable" unless the original message is genuinely harsh and
+  needs that kind of softening — most everyday messages don't need it at all.
+- Reply with ONLY the final message text the person should send. No quotes, no explanation, no
+  preamble.`;
+
 const PROOF_SYSTEM_PROMPT = `You are a fast first-pass reviewer for a verification queue. You are
 shown one photo someone submitted as proof of being a student or professional, along with what
 type of document they claim it is. Your only job: does this photo plausibly look like that kind
@@ -114,6 +136,32 @@ async function handleCoach(apiKey: string, body: Record<string, unknown>) {
       return json({ ok: false, message: "Coach is busy right now. Try again in a moment." }, 200);
     }
     return json({ ok: false, message: "Coach is unavailable right now." }, 200);
+  }
+}
+
+async function handleRewriteMessage(apiKey: string, body: Record<string, unknown>) {
+  const text = String(body?.text ?? "").slice(0, 2000);
+  const peerContext = String(body?.peer_context ?? "").slice(0, 300);
+  if (!text.trim()) {
+    return json({ ok: false, message: "Type a message first, then tap Improve." }, 200);
+  }
+  try {
+    const data = await callGroq(apiKey, {
+      model: TEXT_MODEL,
+      temperature: 0.3,
+      max_tokens: 300,
+      messages: [
+        { role: "system", content: REWRITE_SYSTEM_PROMPT },
+        ...(peerContext ? [{ role: "system", content: `Who they're messaging: ${peerContext}` }] : []),
+        { role: "user", content: text },
+      ],
+    });
+    const reply = data?.choices?.[0]?.message?.content?.trim().replace(/^["“]|["”]$/g, "") || "";
+    if (!reply) return json({ ok: false, message: "Could not improve that message. Try again." }, 200);
+    return json({ ok: true, reply });
+  } catch (error) {
+    console.error("Rewrite failure", error);
+    return json({ ok: false, message: "Message improver is unavailable right now." }, 200);
   }
 }
 
@@ -217,6 +265,9 @@ Deno.serve(async (req: Request) => {
 
   if (body?.type === "verify-proof") {
     return handleVerifyProof(apiKey, body);
+  }
+  if (body?.type === "rewrite-message") {
+    return handleRewriteMessage(apiKey, body);
   }
   return handleCoach(apiKey, body);
 });

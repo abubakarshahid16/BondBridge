@@ -107,6 +107,43 @@ self.addEventListener("fetch", (event) => {
   }
   event.respondWith(caches.match(event.request).then((cached) => cached || fetch(event.request)));
 });
+
+// Real background push — this fires even if BondBridge isn't open anywhere,
+// as long as the browser/OS lets the service worker wake up for it. This is
+// what makes a new message "ping" and an incoming call "ring" like a normal
+// messaging app instead of only working while a BondBridge tab is focused.
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = { title: "BondBridge", body: event.data ? event.data.text() : "" };
+  }
+  const title = data.title || "BondBridge";
+  const options = {
+    body: data.body || "",
+    icon: "./icon.svg",
+    badge: "./icon.svg",
+    tag: data.tag || "bondbridge",
+    renotify: true,
+    requireInteraction: Boolean(data.requireInteraction),
+    data: data.data || {},
+  };
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const targetUrl = "./";
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ("focus" in client) return client.focus();
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
+    }),
+  );
+});
 `.trim();
 
 await rm(output, { recursive: true, force: true });

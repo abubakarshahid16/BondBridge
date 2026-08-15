@@ -183,13 +183,66 @@ function stopRingtone() {
 }
 
 // Ask once, right after sign-in, so the permission prompt has an obvious
-// reason attached to it instead of appearing out of nowhere mid-call.
+// reason attached to it instead of appearing out of nowhere mid-call. Once
+// granted, also register for real background push (see subscribeToPush)
+// so messages/calls can ping and ring even with the app fully closed.
 function requestCallNotificationPermission() {
   try {
-    if ("Notification" in window && Notification.permission === "default") {
-      Notification.requestPermission().catch(() => {});
+    if (!("Notification" in window)) return;
+    if (Notification.permission === "default") {
+      Notification.requestPermission()
+        .then((permission) => {
+          if (permission === "granted") subscribeToPush().catch(() => {});
+        })
+        .catch(() => {});
+    } else if (Notification.permission === "granted") {
+      subscribeToPush().catch(() => {});
     }
   } catch { /* best effort */ }
+}
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; i += 1) outputArray[i] = rawData.charCodeAt(i);
+  return outputArray;
+}
+
+// Registers this browser/device for real Web Push, so new messages and
+// incoming calls can wake it up (ping/ring) even after the app/tab and the
+// whole browser have been closed — the same mechanism WhatsApp/Instagram
+// use under the hood. Safe to call repeatedly; it's a no-op once already
+// subscribed on this device.
+async function subscribeToPush() {
+  if (!isSignedIn()) return;
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+  const publicKey = window.BONDBRIDGE_VAPID_PUBLIC_KEY || "";
+  if (!publicKey) return;
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey),
+      });
+    }
+    const raw = subscription.toJSON();
+    if (!raw.endpoint || !raw.keys?.p256dh || !raw.keys?.auth) return;
+    await apiJson("/api/push/subscribe", {
+      method: "POST",
+      auth: true,
+      body: JSON.stringify({
+        endpoint: raw.endpoint,
+        p256dh: raw.keys.p256dh,
+        auth: raw.keys.auth,
+      }),
+    });
+  } catch (error) {
+    console.error("Push subscription failed", error?.message || error);
+  }
 }
 
 // Browser notification for an incoming call, so it's noticeable even if
@@ -3310,12 +3363,47 @@ function hasAbuse(text) {
   return blocked.some((word) => normalized.includes(word));
 }
 
+// Offline/AI-unreachable fallback only. This used to always wrap the
+// message in a canned "Hi, I wanted to say this respectfully... I would
+// appreciate your thoughts whenever you are comfortable" template — which
+// mangled short, already-friendly replies (including non-English ones,
+// where it left the original text jammed in the middle of English
+// boilerplate) into something robotic and confusing. Without a real AI
+// call to judge tone, the safest move is to leave the person's own words
+// alone and only tidy up obvious noise.
 function respectfulRewrite(text) {
   const clean = text.trim();
-  if (!clean) {
-    return "Hi, I saw your verified profile and thought we may have a good conversation. Would you be open to connecting?";
+  if (!clean) return "";
+  return clean.replace(/[!]{2,}/g, "!").replace(/[ \t]{2,}/g, " ");
+}
+
+// Real AI-backed message polish — keeps the person's own language and
+// intent, only smooths out actual problems (see the coach Edge Function's
+// rewrite-message prompt). Returns "" if the AI is unreachable so the
+// caller can fall back to the light local cleanup above instead of
+// silently mangling the message.
+async function improveMessageWithAI(text, peerContext) {
+  const url = window.BONDBRIDGE_AI_URL || "";
+  const key = window.BONDBRIDGE_SUPABASE_KEY || "";
+  const token = authAccessToken || "";
+  if (!url || !key || !token) return "";
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, apikey: key },
+      body: JSON.stringify({ type: "rewrite-message", text, peer_context: peerContext || "" }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!response.ok) return "";
+    const data = await response.json();
+    if (!data?.ok || !data.reply) return "";
+    return String(data.reply).trim();
+  } catch {
+    return "";
   }
-  return `Hi, I wanted to say this respectfully: ${clean.replace(/[!]{2,}/g, ".")} I would appreciate your thoughts whenever you are comfortable.`;
 }
 
 async function generateSuggestions() {
@@ -4026,6 +4114,7 @@ async function supabaseRoute(client, rawPath, method, body) {
     case "POST /api/video/signal":         return sbSendVideoSignal(client, body);
     case "GET /api/video/signals":         return sbListVideoSignals(client, params.get("room_id"));
     case "POST /api/story":                return sbSetStory(client, body);
+    case "POST /api/push/subscribe":       return sbSavePushSubscription(client, body);
     case "POST /api/moderate":
       return { ok: true, allowed: !hasAbuse(body.text || ""), provider: "on-device" };
     case "POST /api/identity/session":
@@ -4463,6 +4552,20 @@ async function sbSetStory(client, body) {
     .from("profiles")
     .update({ story_url: body.story_url || null, story_updated_at: new Date().toISOString() })
     .eq("id", user.id);
+  if (error) return { ok: false, message: error.message };
+  return { ok: true };
+}
+
+async function sbSavePushSubscription(client, body) {
+  const user = await currentAuthUser(client);
+  if (!user) return { ok: false, message: "You're signed out." };
+  const endpoint = String(body.endpoint || "").trim();
+  const p256dh = String(body.p256dh || "").trim();
+  const auth = String(body.auth || "").trim();
+  if (!endpoint || !p256dh || !auth) return { ok: false, message: "Incomplete push subscription." };
+  const { error } = await client
+    .from("push_subscriptions")
+    .upsert({ user_id: user.id, endpoint, p256dh, auth }, { onConflict: "endpoint" });
   if (error) return { ok: false, message: error.message };
   return { ok: true };
 }
@@ -5135,12 +5238,28 @@ document.addEventListener("click", async (event) => {
 
   if (action === "rewrite-chat") {
     const input = document.querySelector("#chat-input");
-    if (input) {
-      input.value = respectfulRewrite(input.value);
-      input.focus();
-      toast("Message improved.");
+    if (!input) return;
+    const original = input.value.trim();
+    // Don't silently swap an empty box for a canned opener — that's how a
+    // generic "Hi, I saw your profile..." message ends up sent without the
+    // person realizing it wasn't something they actually wrote.
+    if (!original) {
+      toast("Type a message first, then tap Improve to polish it.");
       return;
     }
+    const wasDisabled = button.disabled;
+    button.disabled = true;
+    try {
+      const peer = profileById(state.selectedChat);
+      const peerContext = peer ? `${peer.name}, ${peer.role} in ${peer.field}, interested in ${peer.purposes?.join(", ") || "connecting respectfully"}.` : "";
+      const improved = (await improveMessageWithAI(original, peerContext)) || respectfulRewrite(original);
+      input.value = improved || original;
+      input.focus();
+      toast(improved && improved !== original ? "Message improved." : "That message already looked good.");
+    } finally {
+      button.disabled = wasDisabled;
+    }
+    return;
   }
 
   if (action === "send-message") await sendMessage();
@@ -5534,6 +5653,11 @@ window.setInterval(() => {
     // Stale local flag but no real session — treat as signed out
     authAccessToken = "";
     if (state.auth.session) state.auth.session.signedIn = false;
+  } else if ("Notification" in window && Notification.permission === "granted") {
+    // Returning signed-in user who already granted notification permission
+    // earlier — re-subscribe quietly so a fresh service worker/browser
+    // profile still gets background push, not just brand-new logins.
+    subscribeToPush().catch(() => {});
   }
 
   if (!isSignedIn() && !state.guestMode) {
