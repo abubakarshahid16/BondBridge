@@ -596,8 +596,40 @@ function timeAgo(isoString) {
   return new Date(isoString).toLocaleDateString();
 }
 
+const STORY_LIFETIME_MS = 24 * 60 * 60 * 1000; // Stories disappear 24h after posting, like every other story feature.
+
+function isStoryExpired(story) {
+  if (!story || !story.createdAt) return false; // No timestamp to judge by — don't hide it.
+  const postedAt = new Date(story.createdAt).getTime();
+  if (Number.isNaN(postedAt)) return false;
+  return Date.now() - postedAt > STORY_LIFETIME_MS;
+}
+
+// The single source of truth for "does this person currently have a live
+// story" — everywhere the UI shows/hides the story ring should go through
+// this instead of reading `.story` directly, so an old photo never lingers
+// past 24h just because nothing happened to clear it.
+function activeStory(user) {
+  const story = user?.story;
+  if (!story) return null;
+  return isStoryExpired(story) ? null : story;
+}
+
+// Runs on load, after every profile refresh, and on a timer while the app
+// is open, so a story vanishes on its own — no page reload required — and
+// the server record gets cleaned up too instead of just hiding client-side.
+function expireStoryIfNeeded() {
+  const story = state.currentUser?.story;
+  if (!story || !isStoryExpired(story)) return;
+  state.currentUser.story = null;
+  saveState();
+  if (isSignedIn()) {
+    apiJson("/api/story", { method: "POST", auth: true, body: JSON.stringify({ story_url: null }) }).catch(() => {});
+  }
+}
+
 function storyMediaNode() {
-  const media = state.currentUser.story && state.currentUser.story.dataUrl;
+  const media = activeStory(state.currentUser) && state.currentUser.story.dataUrl;
   if (media) {
     return `<img class="story-photo" src="${escapeHtml(media)}" alt="Your story" />`;
   }
@@ -704,6 +736,7 @@ function applyProfileRowToCurrentUser(row) {
   } else if (row.story_url === null) {
     state.currentUser.story = null;
   }
+  expireStoryIfNeeded();
   state.currentUser.verification = {
     identity: row.identity_status || state.currentUser.verification.identity,
     role: row.role_status || state.currentUser.verification.role,
@@ -888,17 +921,26 @@ function renderTopbar() {
   };
   const [title, subtitle] = titles[state.view] || titles.dashboard;
   const installed = isStandaloneApp();
+  // Once BondBridge is installed, a disabled "Installed" checkmark button
+  // sitting in the topbar forever does nothing useful — it's just clutter.
+  // Only offer the Install button while there's actually something to do.
   return `
     <header class="topbar">
       <div>
         <h1>${escapeHtml(title)}</h1>
         <p>${escapeHtml(subtitle)}</p>
       </div>
-      <div class="topbar-actions">
-        <button class="button ${installed ? "success" : "gradient"} install-button" data-action="install-pwa" title="${installed ? "App installed" : "Install app"}" ${installed ? "disabled" : ""}>
-          ${icon(installed ? "check" : "download")}<span class="install-label">${installed ? "Installed" : "Install"}</span>
-        </button>
-      </div>
+      ${
+        installed
+          ? ""
+          : `
+            <div class="topbar-actions">
+              <button class="button gradient install-button" data-action="install-pwa" title="Install app">
+                ${icon("download")}<span class="install-label">Install</span>
+              </button>
+            </div>
+          `
+      }
     </header>
   `;
 }
@@ -1069,7 +1111,7 @@ function renderInstaStories() {
     })),
   ];
 
-  const hasStory = Boolean(state.currentUser.story);
+  const hasStory = Boolean(activeStory(state.currentUser));
 
   return `
     <article class="story-tray">
@@ -1900,10 +1942,10 @@ function renderProfileCard(profile) {
         <p class="small">${escapeHtml(profile.about)}</p>
         <div class="badge-row">${profile.purposes.slice(0, 3).map((purpose) => `<span class="badge">${escapeHtml(purpose)}</span>`).join("")}</div>
         <div class="profile-actions">
-          <button class="icon-button" data-action="start-lounge" data-id="${profile.id}" title="Video intro">${icon("video")}</button>
+          <button class="icon-button" data-action="start-lounge" data-id="${profile.id}" title="Video intro with ${escapeHtml(profile.name)}">${icon("video")}</button>
           ${action}
-          <button class="icon-button" data-action="skip-profile" data-id="${profile.id}" title="Skip profile">${icon("ban")}</button>
-          <button class="icon-button" data-action="report-profile" data-id="${profile.id}" title="Report profile">${icon("flag")}</button>
+          <button class="icon-button" data-action="skip-profile" data-id="${profile.id}" title="Skip ${escapeHtml(profile.name)}">${icon("ban")}</button>
+          <button class="icon-button" data-action="report-profile" data-id="${profile.id}" title="Report ${escapeHtml(profile.name)}">${icon("flag")}</button>
         </div>
       </div>
     </article>
@@ -2095,7 +2137,7 @@ function renderThread(profile) {
         }
       </div>
       <div class="composer">
-        <input class="input" id="chat-input" placeholder="Write a respectful message..." />
+        <input class="input" id="chat-input" placeholder="Write a respectful message..." aria-label="Message" />
         <label class="icon-button file-pick" title="Attach image or file">
           ${icon("image")}
           <input id="chat-attachment" type="file" accept="image/*,.pdf,.doc,.docx" />
@@ -2898,6 +2940,22 @@ function getValue(id) {
   return node ? node.value.trim() : "";
 }
 
+// A handful of actions (send a connection request, send a chat message, add
+// a family reminder) read from inputs and only clear/update them *after* an
+// await — a fast double-tap or a slow connection can fire the same action
+// twice before the first call finishes. This is a lightweight, no-UI-rework
+// guard: block a second call with the same key while the first is in flight.
+const pendingActionKeys = new Set();
+async function withActionGuard(key, fn) {
+  if (pendingActionKeys.has(key)) return;
+  pendingActionKeys.add(key);
+  try {
+    return await fn();
+  } finally {
+    pendingActionKeys.delete(key);
+  }
+}
+
 function toast(message) {
   const node = document.querySelector("#toast");
   node.textContent = message;
@@ -3571,45 +3629,47 @@ function profileById(id) {
 }
 
 async function connect(profileId) {
-  const profile = profileById(profileId);
-  if (!profile) return;
+  return withActionGuard(`connect:${profileId}`, async () => {
+    const profile = profileById(profileId);
+    if (!profile) return;
 
-  // Demo profile — prompt to sign up instead of sending a real request
-  if (profile.isDemo) {
-    toast("Sign up to send real connection requests to verified people.");
-    state.view = "auth";
-    state.authTab = "signup";
-    saveState();
-    render();
-    return;
-  }
-  if (requestFor(profileId) || state.connections.includes(profileId)) {
-    toast("This person is already in your request or connection list.");
-    return;
-  }
-  if (!requireSignedIn("sending a real connection request")) return;
-  const result = await apiJson("/api/connections/request", {
-    method: "POST",
-    auth: true,
-    body: JSON.stringify({
-      recipient_id: profileId,
-      note: `I would like a respectful ${profile.purposes[0]?.toLowerCase() || "friendship"} connection.`,
-    }),
+    // Demo profile — prompt to sign up instead of sending a real request
+    if (profile.isDemo) {
+      toast("Sign up to send real connection requests to verified people.");
+      state.view = "auth";
+      state.authTab = "signup";
+      saveState();
+      render();
+      return;
+    }
+    if (requestFor(profileId) || state.connections.includes(profileId)) {
+      toast("This person is already in your request or connection list.");
+      return;
+    }
+    if (!requireSignedIn("sending a real connection request")) return;
+    const result = await apiJson("/api/connections/request", {
+      method: "POST",
+      auth: true,
+      body: JSON.stringify({
+        recipient_id: profileId,
+        note: `I would like a respectful ${profile.purposes[0]?.toLowerCase() || "friendship"} connection.`,
+      }),
+    });
+    if (!result.ok) {
+      toast(result.payload?.message || "Connection request could not be sent.");
+      return;
+    }
+    state.requests.unshift({
+      id: result.payload?.connection?.id || `r-${Date.now()}`,
+      profileId,
+      direction: "outgoing",
+      status: "pending",
+      note: `You requested a ${(profile.purposes[0] || "friendship").toLowerCase()} connection with ${profile.name}.`,
+      createdAt: today(),
+    });
+    await refreshConnections(false);
+    toast(`Connection request sent to ${profile.name}.`);
   });
-  if (!result.ok) {
-    toast(result.payload?.message || "Connection request could not be sent.");
-    return;
-  }
-  state.requests.unshift({
-    id: result.payload?.connection?.id || `r-${Date.now()}`,
-    profileId,
-    direction: "outgoing",
-    status: "pending",
-    note: `You requested a ${(profile.purposes[0] || "friendship").toLowerCase()} connection with ${profile.name}.`,
-    createdAt: today(),
-  });
-  await refreshConnections(false);
-  toast(`Connection request sent to ${profile.name}.`);
 }
 
 async function acceptRequest(requestId) {
@@ -3673,8 +3733,7 @@ function readFileAsDataUrl(file) {
   });
 }
 
-async function buildChatAttachment() {
-  const file = document.querySelector("#chat-attachment")?.files?.[0];
+async function buildChatAttachment(file) {
   if (!file) return null;
   if (file.type.startsWith("image/")) {
     return {
@@ -3713,103 +3772,109 @@ async function uploadFileToStorage(bucket, file) {
 }
 
 async function sendMessage() {
-  const input = document.querySelector("#chat-input");
-  const text = input ? input.value.trim() : "";
-  const file = document.querySelector("#chat-attachment")?.files?.[0];
-  if (!text && !file) return;
-  if (hasAbuse(text)) {
-    state.moderationLog.unshift("Blocked outgoing message for disrespectful language.");
-    toast("Message blocked — please rewrite it respectfully.");
-    return;
-  }
-  const profileId = state.selectedChat;
-  if (!profileId) return;
-
-  // Build attachment locally first (works without Supabase)
-  let attachment = null;
-  if (file) {
-    try {
-      attachment = await buildChatAttachment();
-    } catch (error) {
-      toast("Could not read the attachment. Try again.");
+  return withActionGuard("send-message", async () => {
+    const input = document.querySelector("#chat-input");
+    const text = input ? input.value.trim() : "";
+    const file = document.querySelector("#chat-attachment")?.files?.[0];
+    if (!text && !file) return;
+    if (hasAbuse(text)) {
+      state.moderationLog.unshift("Blocked outgoing message for disrespectful language.");
+      toast("Message blocked — please rewrite it respectfully.");
       return;
     }
-  }
+    const profileId = state.selectedChat;
+    if (!profileId) return;
 
-  // Save message locally immediately so UX feels instant
-  if (!state.chats[profileId]) state.chats[profileId] = [];
-  state.chats[profileId].push({
-    id: `msg-${Date.now()}`,
-    from: "me",
-    text,
-    attachment,
-    time: nowTime(),
-  });
-  if (input) input.value = "";
-  // Clear attachment input
-  const attachInput = document.querySelector("#chat-attachment");
-  if (attachInput) attachInput.value = "";
+    // Clear the inputs up front (before any await) so a second tap on Send
+    // while this one is still in flight has nothing left to resubmit.
+    if (input) input.value = "";
+    const attachInput = document.querySelector("#chat-attachment");
+    if (attachInput) attachInput.value = "";
 
-  saveState();
-  render();
-
-  // Optionally try to sync to Supabase if signed in (non-blocking)
-  if (isSignedIn()) {
-    let attachmentPath = "";
-    if (file && attachment) {
+    // Build attachment locally first (works without Supabase)
+    let attachment = null;
+    if (file) {
       try {
-        const uploaded = await uploadFileToStorage("bondbridge-chat", file);
-        attachmentPath = uploaded?.path || "";
-      } catch (_) {
-        // Attachment stays local — not a fatal error
+        attachment = await buildChatAttachment(file);
+      } catch (error) {
+        toast("Could not read the attachment. Try again.");
+        return;
       }
     }
-    apiJson("/api/messages", {
-      method: "POST",
-      auth: true,
-      body: JSON.stringify({ recipient_id: profileId, body: text, attachment_path: attachmentPath }),
-    }).catch(() => {});
-  }
+
+    // Save message locally immediately so UX feels instant
+    if (!state.chats[profileId]) state.chats[profileId] = [];
+    state.chats[profileId].push({
+      id: `msg-${Date.now()}`,
+      from: "me",
+      text,
+      attachment,
+      time: nowTime(),
+    });
+
+    saveState();
+    render();
+
+    // Optionally try to sync to Supabase if signed in (non-blocking)
+    if (isSignedIn()) {
+      let attachmentPath = "";
+      if (file && attachment) {
+        try {
+          const uploaded = await uploadFileToStorage("bondbridge-chat", file);
+          attachmentPath = uploaded?.path || "";
+        } catch (_) {
+          // Attachment stays local — not a fatal error
+        }
+      }
+      apiJson("/api/messages", {
+        method: "POST",
+        auth: true,
+        body: JSON.stringify({ recipient_id: profileId, body: text, attachment_path: attachmentPath }),
+      }).catch(() => {});
+    }
+  });
 }
 
 async function addFamily() {
-  const name = getValue("family-name");
-  if (!name) {
-    toast("Add a name first.");
-    return;
-  }
-  const reminder = {
-    id: `f-${Date.now()}`,
-    name,
-    relation: getValue("family-relation") || "Friend",
-    channel: getValue("family-channel") || "Message",
-    cadence: Math.max(1, Number(getValue("family-cadence")) || 14),
-    lastContactDays: 0,
-    notes: getValue("family-notes") || "Check in with kindness.",
-  };
-
-  if (isSignedIn()) {
-    const result = await apiJson("/api/family-reminders", {
-      method: "POST",
-      auth: true,
-      body: JSON.stringify({
-        name: reminder.name,
-        relationship: reminder.relation,
-        cadence_days: reminder.cadence,
-        notes: reminder.notes,
-      }),
-    });
-    if (!result.ok) {
-      toast(result.payload?.message || "Reminder could not sync.");
+  return withActionGuard("add-family", async () => {
+    const name = getValue("family-name");
+    if (!name) {
+      toast("Add a name first.");
       return;
     }
-    await refreshFamilyReminders(false);
-    toast("Relationship reminder synced.");
-    return;
-  }
+    const reminder = {
+      id: `f-${Date.now()}`,
+      name,
+      relation: getValue("family-relation") || "Friend",
+      channel: getValue("family-channel") || "Message",
+      cadence: Math.max(1, Number(getValue("family-cadence")) || 14),
+      lastContactDays: 0,
+      notes: getValue("family-notes") || "Check in with kindness.",
+    };
 
-  state.family.unshift(reminder);
-  toast("Reminder saved locally. Log in to sync it.");
+    if (isSignedIn()) {
+      const result = await apiJson("/api/family-reminders", {
+        method: "POST",
+        auth: true,
+        body: JSON.stringify({
+          name: reminder.name,
+          relationship: reminder.relation,
+          cadence_days: reminder.cadence,
+          notes: reminder.notes,
+        }),
+      });
+      if (!result.ok) {
+        toast(result.payload?.message || "Reminder could not sync.");
+        return;
+      }
+      await refreshFamilyReminders(false);
+      toast("Relationship reminder synced.");
+      return;
+    }
+
+    state.family.unshift(reminder);
+    toast("Reminder saved locally. Log in to sync it.");
+  });
 }
 
 async function markFamilyContacted(id) {
@@ -5258,7 +5323,7 @@ document.addEventListener("change", async (event) => {
       return;
     }
     // Show it immediately so the app never feels stuck while it uploads.
-    state.currentUser.story = { name: file.name, dataUrl, createdAt: nowTime() };
+    state.currentUser.story = { name: file.name, dataUrl, createdAt: new Date().toISOString() };
     state.storyViewerOpen = false;
     render();
 
@@ -5277,7 +5342,7 @@ document.addEventListener("change", async (event) => {
         body: JSON.stringify({ story_url: publicUrl }),
       });
       if (!saved.ok) throw new Error(saved.payload?.message || "Could not save your story.");
-      state.currentUser.story = { name: file.name, dataUrl: publicUrl, createdAt: nowTime() };
+      state.currentUser.story = { name: file.name, dataUrl: publicUrl, createdAt: new Date().toISOString() };
       saveState();
       toast("Story added.");
       render();
@@ -5454,7 +5519,16 @@ async function restoreSupabaseSession() {
 //  BOOT
 // ═══════════════════════════════════════════════════════════════════════════
 
+// Sweep for an expired story every minute so it disappears on its own while
+// the app is open — nobody should have to reload the page to see it go.
+window.setInterval(() => {
+  const hadStory = Boolean(state.currentUser?.story);
+  expireStoryIfNeeded();
+  if (hadStory && !state.currentUser?.story) render();
+}, 60000);
+
 (async function boot() {
+  expireStoryIfNeeded();
   const restored = await restoreSupabaseSession();
   if (!restored) {
     // Stale local flag but no real session — treat as signed out

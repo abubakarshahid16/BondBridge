@@ -1770,6 +1770,18 @@ button {
   text-align: center;
 }
 
+/* When there's no live video yet, the tile falls back to a fixed-size
+   avatar photo/initials circle. It needs to be centered explicitly —
+   inset:0 + margin:auto centers a fixed-size box reliably without
+   reintroducing the grid+percentage-height bug that broke the actual
+   <video> element's sizing (see .local-video-preview above). */
+.live-video-tile > .avatar-photo,
+.live-video-tile > .avatar {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+}
+
 .live-video-tile.self-tile {
   min-height: clamp(180px, 30dvh, 260px);
   align-self: end;
