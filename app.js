@@ -773,10 +773,6 @@ function render() {
     </main>
     ${renderCoachPanel()}
     ${state.incomingCall ? renderIncomingCallBanner() : ""}
-    <button class="floating-theme" data-action="toggle-theme" title="Switch ${state.theme === "dark" ? "light" : "dark"} mode">
-      ${icon(state.theme === "dark" ? "sun" : "moon")}
-      <span>${state.theme === "dark" ? "Light" : "Dark"}</span>
-    </button>
   `;
   attachLocalVideo();
   attachCallVideos();
