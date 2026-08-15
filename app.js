@@ -1256,6 +1256,7 @@ function renderMeetPost(profile, topMatch) {
       </article>
     `;
   }
+  const meetConnected = state.connections.includes(profile.id);
   return `
     <article class="insta-post">
       <header class="post-head">
@@ -1281,7 +1282,7 @@ function renderMeetPost(profile, topMatch) {
         </div>
       </div>
       <div class="post-actions">
-        <button class="post-icon" data-action="start-lounge" data-id="${profile.id}" title="Start intro">${icon("phone")}</button>
+        <button class="post-icon" data-action="start-lounge" data-id="${profile.id}" title="${meetConnected ? `Video call ${escapeHtml(profile.name)}` : "Preview your camera"}">${icon(meetConnected ? "video" : "phone")}</button>
         <button class="post-icon" data-action="connect" data-id="${profile.id}" title="Request">${icon("heart")}</button>
         <button class="post-icon" data-action="translate-preview" data-id="${profile.id}" title="AI help">${icon("sparkles")}</button>
         <button class="post-icon push" data-action="report-profile" data-id="${profile.id}" title="Report">${icon("flag")}</button>
@@ -1291,7 +1292,7 @@ function renderMeetPost(profile, topMatch) {
         <span>${escapeHtml(profile.about)}</span>
       </div>
       <div class="post-cta">
-        <button class="button gradient" data-action="start-lounge" data-id="${profile.id}" title="Start verified intro">Start intro</button>
+        <button class="button gradient" data-action="start-lounge" data-id="${profile.id}" title="${meetConnected ? "Start a real call" : "Preview your camera before requesting"}">${meetConnected ? "Start call" : "Preview camera"}</button>
         <button class="button" data-action="connect" data-id="${profile.id}" title="Send request">Request</button>
       </div>
     </article>
@@ -2010,7 +2011,14 @@ function renderProfileCard(profile) {
         <p class="small">${escapeHtml(profile.about)}</p>
         <div class="badge-row">${profile.purposes.slice(0, 3).map((purpose) => `<span class="badge">${escapeHtml(purpose)}</span>`).join("")}</div>
         <div class="profile-actions">
-          <button class="icon-button" data-action="start-lounge" data-id="${profile.id}" title="Video intro with ${escapeHtml(profile.name)}">${icon("video")}</button>
+          ${
+            // Only show a call icon once you're actually connected — showing
+            // it earlier looked like you could call a stranger directly,
+            // which is exactly what caused real confusion in testing.
+            connected
+              ? `<button class="icon-button" data-action="start-lounge" data-id="${profile.id}" title="Video call ${escapeHtml(profile.name)}">${icon("video")}</button>`
+              : ""
+          }
           ${action}
           <button class="icon-button" data-action="skip-profile" data-id="${profile.id}" title="Skip ${escapeHtml(profile.name)}">${icon("ban")}</button>
           <button class="icon-button" data-action="report-profile" data-id="${profile.id}" title="Report ${escapeHtml(profile.name)}">${icon("flag")}</button>
