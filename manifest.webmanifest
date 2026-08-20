@@ -1,0 +1,50 @@
+{
+  "id": "./",
+  "name": "Kinora Verified",
+  "short_name": "Kinora",
+  "description": "Verified respectful connections, family reminders, private chat, and free browser calls.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#050505",
+  "theme_color": "#d62976",
+  "orientation": "portrait-primary",
+  "categories": [
+    "social",
+    "productivity"
+  ],
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Meet People",
+      "short_name": "Meet",
+      "url": "./?view=discover",
+      "icons": [
+        {
+          "src": "./icon.svg",
+          "sizes": "any",
+          "type": "image/svg+xml"
+        }
+      ]
+    },
+    {
+      "name": "Family",
+      "short_name": "Family",
+      "url": "./?view=family",
+      "icons": [
+        {
+          "src": "./icon.svg",
+          "sizes": "any",
+          "type": "image/svg+xml"
+        }
+      ]
+    }
+  ]
+}

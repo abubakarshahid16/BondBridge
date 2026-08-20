@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kinora Verified</title>
+    <meta
+      name="description"
+      content="A verified relationship platform for students, professionals, families, friendships, and serious connections."
+    />
+    <meta name="theme-color" content="#d62976" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Kinora" />
+    <meta property="og:title" content="Kinora Verified" />
+    <meta
+      property="og:description"
+      content="Verified respectful connections, family reminders, private chat, and free browser calls."
+    />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./icon.svg" />
+    <link rel="stylesheet" href="./styles.css?v1787266737" />
+  </head>
+  <body>
+    <!-- No class here on purpose: render() in app.js decides per-view whether
+         #app is a full-screen layout (landing/auth) or the app-shell grid.
+         Hardcoding "app-shell" here previously trapped the landing/auth
+         pages inside the grid's narrow center column on every screen size. -->
+    <div id="app"></div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <!-- Supabase config. The publishable key is safe in public code —
+         Row Level Security is what actually protects the data. -->
+    <script>
+      window.KINORA_SUPABASE_URL = "https://fpbodwjgypxzqpstwcvo.supabase.co";
+      window.KINORA_SUPABASE_KEY = "sb_publishable_nLwhMDYKDfAY_OP-o3c-iA_LJtQ2Ai_";
+      window.KINORA_AI_URL = "https://fpbodwjgypxzqpstwcvo.supabase.co/functions/v1/coach";
+      // Same Edge Function as above — it also hands out short-lived TURN
+      // credentials (see the coach function's "turn-credentials" type) once
+      // a TURN provider API key is added as a secret. Falls back to
+      // STUN-only automatically if that secret isn't set yet.
+      window.KINORA_TURN_URL = "https://fpbodwjgypxzqpstwcvo.supabase.co/functions/v1/coach";
+      // Public VAPID key for Web Push — safe to publish (it's the whole
+      // point of a "public" key). It lets this browser register for push
+      // notifications that keep working after the app/tab is closed.
+      window.KINORA_VAPID_PUBLIC_KEY = "BIUVUzbmU8PWZk3geucsRCo_6L7tQRqSD2dajE3D6FLGG4EM9alp9mhHDvDTIsBLjAEHdZDiwzh173geQmmHnRo";
+      window.BONDBRIDGE_SUPABASE_URL = window.KINORA_SUPABASE_URL;
+      window.BONDBRIDGE_SUPABASE_KEY = window.KINORA_SUPABASE_KEY;
+      window.BONDBRIDGE_AI_URL = window.KINORA_AI_URL;
+      window.BONDBRIDGE_TURN_URL = window.KINORA_TURN_URL;
+      window.BONDBRIDGE_VAPID_PUBLIC_KEY = window.KINORA_VAPID_PUBLIC_KEY;
+    </script>
+    <!-- Bundled locally rather than loaded from a CDN, so the app still works
+         if the CDN is blocked, slow, or down. -->
+    <script src="./supabase-lib.js"></script>
+    <script src="./config.js?v1787266737"></script>
+    <script src="./app.js?v1787266737"></script>
+  </body>
+</html>
+
