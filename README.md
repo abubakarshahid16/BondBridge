@@ -1,17 +1,9 @@
 # Kinora Verified
 
 [![Deploy Kinora PWA](https://github.com/abubakarshahid16/Kindred/actions/workflows/deploy-pages.yml/badge.svg)](https://github.com/abubakarshahid16/Kindred/actions/workflows/deploy-pages.yml)
-![PWA](https://img.shields.io/badge/PWA-installable-405de6)
-![Supabase](https://img.shields.io/badge/backend-Supabase-00a884)
-![No paid APIs required](https://img.shields.io/badge/launch-no_paid_APIs-16a34a)
 
 Kinora is a trust-first social relationship app for verified students, professionals, families, friendships, and serious connections. It combines profile verification, mutual-only chat, private attachments, family reminders, respectful message coaching, and browser-native voice/video calls in an installable PWA.
 
-<p>
-  <a href="https://abubakarshahid16.github.io/Kindred/">
-    <img alt="Open Kinora PWA" src="https://img.shields.io/badge/Open%20Installable%20PWA-Kinora-405de6?style=for-the-badge">
-  </a>
-</p>
 
 ## Live Links
 
@@ -21,8 +13,6 @@ Kinora is a trust-first social relationship app for verified students, professio
 GitHub Pages is the public deployment path for Kinora. The repository workflow builds the installable PWA and publishes it to the `gh-pages` branch after `main` changes are merged.
 
 ## Screenshots
-
-The screenshots below are captured from the actual app build, not mockups.
 
 | Landing | Discovery |
 |---|---|
