@@ -1,5 +1,65 @@
-const STORAGE_KEY = "bondbridge-verified-live-v3";
-const LEGACY_STORAGE_KEYS = ["bondbridge-verified-v1", "bondbridge-verified-live-v2"];
+const KINORA = window.KINORA_CONFIG || {};
+const APP_NAME = KINORA.app?.name || "Kinora";
+const APP_FULL_NAME = KINORA.app?.fullName || "Kinora Verified";
+const APP_TAGLINE = KINORA.app?.tagline || "Real people. Verified. Better bonds.";
+const STORAGE_KEY = KINORA.storage?.appStateKey || "kinora-verified-live-v1";
+const LEGACY_STORAGE_KEYS = KINORA.storage?.legacyAppStateKeys || [
+  "bondbridge-verified-live-v3",
+  "bondbridge-verified-live-v2",
+  "bondbridge-verified-v1",
+];
+const AUTH_STORAGE_KEY = KINORA.storage?.authStorageKey || "kinora-auth";
+const STORAGE_BUCKETS = KINORA.storage?.buckets || {
+  avatars: "bondbridge-avatars",
+  proofs: "bondbridge-proofs",
+  chat: "bondbridge-chat",
+};
+const STORAGE_BUCKET_VALUES = Object.values(STORAGE_BUCKETS);
+const STORAGE_MIME_TYPES = {
+  [STORAGE_BUCKETS.avatars]: ["image/jpeg", "image/png", "image/webp", "image/gif"],
+  [STORAGE_BUCKETS.proofs]: ["image/jpeg", "image/png", "image/webp", "application/pdf"],
+  [STORAGE_BUCKETS.chat]: [
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ],
+};
+const REALTIME_CHANNEL_NAME = "bondbridge-live";
+const CALL_CHANNEL_PREFIX = "bondbridge-call";
+
+function runtimeValue(name) {
+  if (typeof KINORA.runtimeValue === "function") return KINORA.runtimeValue(name);
+  const keys = {
+    supabaseUrl: ["KINORA_SUPABASE_URL", "BONDBRIDGE_SUPABASE_URL"],
+    supabaseKey: ["KINORA_SUPABASE_KEY", "BONDBRIDGE_SUPABASE_KEY"],
+    aiUrl: ["KINORA_AI_URL", "BONDBRIDGE_AI_URL"],
+    turnUrl: ["KINORA_TURN_URL", "BONDBRIDGE_TURN_URL"],
+    vapidPublicKey: ["KINORA_VAPID_PUBLIC_KEY", "BONDBRIDGE_VAPID_PUBLIC_KEY"],
+  }[name] || [];
+  for (const key of keys) {
+    const value = window[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function storageGet(key) {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+
+function storageSet(key, value) {
+  try { localStorage.setItem(key, value); } catch { /* ignore */ }
+}
+
+function storageRemove(key) {
+  try { localStorage.removeItem(key); } catch { /* ignore */ }
+}
+
+let loadedStorageKey = "";
 
 // User-facing nav (8 items). "launch" is dev-only (URL param ?dev=1).
 const views = [
@@ -109,8 +169,8 @@ const STUN_ONLY_CONFIG = {
 };
 
 async function getIceServers() {
-  const url = window.BONDBRIDGE_TURN_URL || "";
-  const key = window.BONDBRIDGE_SUPABASE_KEY || "";
+  const url = runtimeValue("turnUrl");
+  const key = runtimeValue("supabaseKey");
   const token = authAccessToken || "";
   if (!url || !key || !token) return STUN_ONLY_CONFIG;
   try {
@@ -218,7 +278,7 @@ function urlBase64ToUint8Array(base64String) {
 async function subscribeToPush() {
   if (!isSignedIn()) return;
   if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
-  const publicKey = window.BONDBRIDGE_VAPID_PUBLIC_KEY || "";
+  const publicKey = runtimeValue("vapidPublicKey");
   if (!publicKey) return;
   try {
     const registration = await navigator.serviceWorker.ready;
@@ -246,7 +306,7 @@ async function subscribeToPush() {
 }
 
 // Browser notification for an incoming call, so it's noticeable even if
-// BondBridge isn't the focused tab. This only works while the browser is
+// Kinora isn't the focused tab. This only works while the browser is
 // open — a fully closed browser/app needs native push, which a plain PWA
 // on a free plan can't do without a push server, so this is the practical
 // ceiling for "ring outside the app" here.
@@ -254,10 +314,10 @@ function notifyIncomingCall(peerName, mode = "video") {
   try {
     if (!("Notification" in window)) return;
     if (Notification.permission === "granted") {
-      const note = new Notification(mode === "voice" ? "Incoming BondBridge voice call" : "Incoming BondBridge call", {
+      const note = new Notification(mode === "voice" ? `Incoming ${APP_NAME} voice call` : `Incoming ${APP_NAME} call`, {
         body: `${peerName || "Someone you're connected with"} is calling you.`,
         icon: "./icon.svg",
-        tag: "bondbridge-incoming-call",
+        tag: "kinora-incoming-call",
         renotify: true,
       });
       note.onclick = () => { window.focus(); note.close(); };
@@ -272,7 +332,7 @@ const launchProviders = [
     key: "authData",
     name: "Auth + database",
     detail: "Supabase free Auth, profile sync, RLS, and user-owned records.",
-    env: "SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY",
+    env: "KINORA_SUPABASE_URL/KINORA_SUPABASE_KEY or legacy Supabase keys",
     iconName: "server",
   },
   {
@@ -543,7 +603,10 @@ function today(offset = 0) {
 
 function loadState() {
   const defaults = createInitialState();
-  const raw = localStorage.getItem(STORAGE_KEY);
+  const storageKeys = [STORAGE_KEY, ...LEGACY_STORAGE_KEYS];
+  const sourceKey = storageKeys.find((key) => storageGet(key));
+  const raw = sourceKey ? storageGet(sourceKey) : "";
+  loadedStorageKey = sourceKey || "";
   if (!raw) return defaults;
 
   try {
@@ -583,7 +646,8 @@ function loadState() {
 }
 
 let state = loadState();
-LEGACY_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
+if (loadedStorageKey && loadedStorageKey !== STORAGE_KEY) storageSet(STORAGE_KEY, JSON.stringify(state));
+LEGACY_STORAGE_KEYS.forEach((key) => storageRemove(key));
 const urlView = new URLSearchParams(window.location.search).get("view");
 const allViewIds = [...views.map(([id]) => id), ...hiddenViews];
 if (allViewIds.includes(urlView)) state.view = urlView;
@@ -593,7 +657,7 @@ if (new URLSearchParams(window.location.search).get("dev") === "1") {
 }
 
 function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  storageSet(STORAGE_KEY, JSON.stringify(state));
 }
 
 function icon(name, small = false) {
@@ -855,7 +919,7 @@ function render() {
 
   app.innerHTML = `
     ${renderSidebar()}
-    <main class="main">
+    <main class="main" id="main-content" tabindex="-1">
       ${renderTopbar()}
       ${renderView()}
     </main>
@@ -942,7 +1006,7 @@ function renderSidebar() {
       <div class="brand">
         <div class="brand-mark">${icon("heart")}</div>
         <div>
-          <h1 class="brand-name">BondBridge</h1>
+          <h1 class="brand-name">${escapeHtml(APP_NAME)}</h1>
           <p class="brand-subtitle">Real people. Better bonds.</p>
         </div>
       </div>
@@ -961,7 +1025,7 @@ function renderSidebar() {
 function renderTopbar() {
   const titles = {
     dashboard: ["Home", "Your verified connection feed."],
-    auth: ["Sign In", "Create or access your BondBridge account."],
+    auth: ["Sign In", `Create or access your ${APP_NAME} account.`],
     verify: ["Get Verified", "Prove your identity, role, and one-account status."],
     discover: ["Discover", "Find verified students and professionals to connect with."],
     connections: ["Requests", "Accept the people you want — private chat opens after both agree."],
@@ -975,7 +1039,7 @@ function renderTopbar() {
   };
   const [title, subtitle] = titles[state.view] || titles.dashboard;
   const installed = isStandaloneApp();
-  // Once BondBridge is installed, a disabled "Installed" checkmark button
+  // Once Kinora is installed, a disabled "Installed" checkmark button
   // sitting in the topbar forever does nothing useful — it's just clutter.
   // Only offer the Install button while there's actually something to do.
   return `
@@ -1145,7 +1209,7 @@ function renderWelcomeBanner() {
       <div class="welcome-inner">
         <span class="welcome-icon">${icon("heart")}</span>
         <div>
-          <h2>Welcome to BondBridge</h2>
+          <h2>Welcome to ${escapeHtml(APP_NAME)}</h2>
           <p>You're exploring as a guest. Sign up to connect with verified people, send requests, and chat.</p>
           <div class="row wrap" style="margin-top:12px">
             <button class="button gradient" data-action="go-signup">${icon("plus")}Create account</button>
@@ -1352,7 +1416,7 @@ function renderFamilyPost(person, dueCount) {
         <button class="post-icon push" data-view="family" title="Open reminders">${icon("database")}</button>
       </div>
       <div class="post-caption">
-        <strong>bondbridge</strong>
+        <strong>kinora</strong>
         <span>Small reminders can protect real relationships before distance becomes normal.</span>
       </div>
     </article>
@@ -1624,7 +1688,7 @@ function renderVerify() {
         <div class="verify-welcome-banner">
           <div class="verify-welcome-icon">🎉</div>
           <div>
-            <h3>Welcome to BondBridge, ${escapeHtml(firstName)}!</h3>
+            <h3>Welcome to ${escapeHtml(APP_NAME)}, ${escapeHtml(firstName)}!</h3>
             <p>Your account is ready. Complete these 3 quick steps so real people can find and trust you. It only takes a few minutes.</p>
           </div>
         </div>
@@ -2312,7 +2376,7 @@ function renderCoach() {
       <article class="coach-composer">
         <p class="eyebrow">AI Bond Coach</p>
         <h2>Write something kind</h2>
-        <p class="text-muted">Choose the relationship, goal, and tone. BondBridge suggests respectful messages you can send or edit.</p>
+        <p class="text-muted">Choose the relationship, goal, and tone. ${escapeHtml(APP_NAME)} suggests respectful messages you can send or edit.</p>
         <div class="coach-input-grid">
           ${selectField("Relationship", "coach-relation", ["New verified friend", "Family member", "Old friend", "Study partner", "Professional contact", "Marriage minded match"], state.coach.relation)}
           ${selectField("Goal", "coach-goal", ["Start a respectful conversation", "Reconnect after a long time", "Apologize", "Ask for advice", "Set a boundary", "Plan a call"], state.coach.goal)}
@@ -2574,8 +2638,8 @@ function renderLanding() {
         <div class="landing-logo">
           ${icon("heart")}
         </div>
-        <h1 class="landing-title">BondBridge</h1>
-        <p class="landing-tagline">Real people. Verified. Better bonds.</p>
+        <h1 class="landing-title">${escapeHtml(APP_NAME)}</h1>
+        <p class="landing-tagline">${escapeHtml(APP_TAGLINE)}</p>
         <p class="landing-sub">Connect with verified students and professionals — safely, respectfully, and meaningfully.</p>
 
         <div class="landing-actions">
@@ -2662,7 +2726,7 @@ function renderAuthPage() {
     <div class="auth-fullpage">
       <div class="auth-fullpage-inner">
         <div class="auth-top-row">
-          <button class="auth-back" data-action="go-landing">${icon("heart", true)} BondBridge</button>
+          <button class="auth-back" data-action="go-landing">${icon("heart", true)} ${escapeHtml(APP_NAME)}</button>
           <button class="button ${installed ? "success" : ""} install-button" data-action="install-pwa" title="${installed ? "App installed" : "Install app"}" ${installed ? "disabled" : ""}>
             ${icon(installed ? "check" : "download")}<span class="install-label">${installed ? "Installed" : "Install app"}</span>
           </button>
@@ -2683,7 +2747,7 @@ function renderLoginForm() {
   return `
     <div class="auth-form-card">
       <h2>Welcome back</h2>
-      <p class="text-muted">Log in to your BondBridge account.</p>
+      <p class="text-muted">Log in to your ${escapeHtml(APP_NAME)} account.</p>
       <div class="auth-form-fields">
         ${field("Email", "auth-email", state.auth.email, "email")}
         ${field("Password", "auth-password", "", "password")}
@@ -2699,8 +2763,8 @@ function renderSignupForm() {
     <div class="auth-form-card">
       <div class="auth-form-header">
         <div class="auth-logo">${icon("heart")}</div>
-        <h2>Join BondBridge</h2>
-        <p class="text-muted">Real people. Verified. Better bonds.</p>
+        <h2>Join ${escapeHtml(APP_NAME)}</h2>
+        <p class="text-muted">${escapeHtml(APP_TAGLINE)}</p>
       </div>
       <div class="auth-form-fields">
         ${field("Full name", "auth-name", state.auth.name || state.currentUser.name, "text", "wide")}
@@ -2844,7 +2908,7 @@ function renderSettings() {
         <!-- About -->
         <article class="settings-block">
           <p class="eyebrow">About</p>
-          <h2>BondBridge</h2>
+          <h2>${escapeHtml(APP_NAME)}</h2>
           <p class="text-muted" style="margin:4px 0 12px;font-size:0.9rem">Free · No ads · Respectful by design. Every user is verified before they can connect.</p>
           <div class="settings-list">
             <button class="settings-row" data-view="privacy">
@@ -2932,7 +2996,7 @@ function renderLaunch() {
         <div>
           <p class="eyebrow">SaaS launch console</p>
           <h2>${status && status.ok ? "Free production stack online" : "Free production stack ready"}</h2>
-          <p>BondBridge is deployed with signup, free WebRTC room creation, manual proof review, local safety moderation, and readiness checks.</p>
+          <p>${escapeHtml(APP_NAME)} is deployed with signup, free WebRTC room creation, manual proof review, local safety moderation, and readiness checks.</p>
         </div>
         <div class="launch-score">
           <strong>${readiness}%</strong>
@@ -3083,14 +3147,14 @@ async function startLocalVideo(mode = "video") {
     console.error("getUserMedia failed", error?.name, error?.message);
     const device = mode === "voice" ? "microphone" : "camera or microphone";
     const reasons = {
-      NotAllowedError: `${mode === "voice" ? "Microphone" : "Camera & microphone"} access is blocked for BondBridge. Open your browser (or phone) settings, allow ${mode === "voice" ? "Microphone" : "Camera and Microphone"} for BondBridge, then try the call again.`,
-      PermissionDeniedError: `${mode === "voice" ? "Microphone" : "Camera & microphone"} access is blocked for BondBridge. Open your browser (or phone) settings, allow ${mode === "voice" ? "Microphone" : "Camera and Microphone"} for BondBridge, then try the call again.`,
+      NotAllowedError: `${mode === "voice" ? "Microphone" : "Camera & microphone"} access is blocked for ${APP_NAME}. Open your browser (or phone) settings, allow ${mode === "voice" ? "Microphone" : "Camera and Microphone"} for ${APP_NAME}, then try the call again.`,
+      PermissionDeniedError: `${mode === "voice" ? "Microphone" : "Camera & microphone"} access is blocked for ${APP_NAME}. Open your browser (or phone) settings, allow ${mode === "voice" ? "Microphone" : "Camera and Microphone"} for ${APP_NAME}, then try the call again.`,
       NotFoundError: `No ${device} was found on this device.`,
       DevicesNotFoundError: `No ${device} was found on this device.`,
       NotReadableError: `Your ${device} is already being used by another app or browser tab. Close it and try the call again.`,
       TrackStartError: `Your ${device} is already being used by another app or browser tab. Close it and try the call again.`,
       OverconstrainedError: "Your device doesn't support the settings this call needs.",
-      SecurityError: "Microphone/camera access is blocked on this page. Make sure you're using the official BondBridge site over a secure (https) connection.",
+      SecurityError: `Microphone/camera access is blocked on this page. Make sure you're using the official ${APP_NAME} site over a secure (https) connection.`,
     };
     const reason = reasons[error?.name] || `Could not access your ${device}. Check your permissions and try again.`;
     return { ok: false, reason };
@@ -3232,7 +3296,7 @@ async function beginCall({ roomId, peerId, peerName, role, mode = "video" }) {
 
   const client = getSupabase();
   if (!client) {
-    toast("Can't reach BondBridge servers.");
+    toast(`Can't reach ${APP_NAME} servers.`);
     await endCall(true);
     return;
   }
@@ -3290,7 +3354,7 @@ async function beginCall({ roomId, peerId, peerName, role, mode = "video" }) {
   }
 
   callSignalChannel = client
-    .channel(`bondbridge-call-${roomId}`)
+    .channel(`${CALL_CHANNEL_PREFIX}-${roomId}`)
     .on(
       "postgres_changes",
       { event: "INSERT", schema: "public", table: "webrtc_signals", filter: `room_id=eq.${roomId}` },
@@ -3381,17 +3445,17 @@ function isStandaloneApp() {
 
 async function installPwa() {
   if (isStandaloneApp()) {
-    toast("BondBridge is already installed.");
+    toast(`${APP_NAME} is already installed.`);
     return;
   }
   if (!installPromptEvent) {
-    toast("Use your browser menu to add BondBridge to the home screen.");
+    toast(`Use your browser menu to add ${APP_NAME} to the home screen.`);
     return;
   }
   installPromptEvent.prompt();
   const choice = await installPromptEvent.userChoice.catch(() => ({ outcome: "dismissed" }));
   installPromptEvent = null;
-  toast(choice.outcome === "accepted" ? "BondBridge install started." : "Install dismissed.");
+  toast(choice.outcome === "accepted" ? `${APP_NAME} install started.` : "Install dismissed.");
   render();
 }
 
@@ -3431,8 +3495,8 @@ function respectfulRewrite(text) {
 // caller can fall back to the light local cleanup above instead of
 // silently mangling the message.
 async function improveMessageWithAI(text, peerContext) {
-  const url = window.BONDBRIDGE_AI_URL || "";
-  const key = window.BONDBRIDGE_SUPABASE_KEY || "";
+  const url = runtimeValue("aiUrl");
+  const key = runtimeValue("supabaseKey");
   const token = authAccessToken || "";
   if (!url || !key || !token) return "";
   try {
@@ -3483,8 +3547,8 @@ async function generateSuggestions() {
 // Calls the Supabase Edge Function, which holds the AI key server-side.
 // Falls back to built-in templates if the coach is unreachable.
 async function askCoachAI({ relation, goal, tone, context }) {
-  const url = window.BONDBRIDGE_AI_URL || "";
-  const key = window.BONDBRIDGE_SUPABASE_KEY || "";
+  const url = runtimeValue("aiUrl");
+  const key = runtimeValue("supabaseKey");
   // The Edge Function verifies a JWT. A signed-in user's access token is one;
   // the publishable key is not. Guests fall back to the built-in templates.
   const token = authAccessToken || "";
@@ -3615,8 +3679,8 @@ function imageDimensions(file) {
 // obviously wrong (a selfie submitted as a "transcript", etc.) so they can
 // fix it right away instead of waiting days to find out.
 async function checkProofImage(dataUrl, documentType) {
-  const url = window.BONDBRIDGE_AI_URL || "";
-  const key = window.BONDBRIDGE_SUPABASE_KEY || "";
+  const url = runtimeValue("aiUrl");
+  const key = runtimeValue("supabaseKey");
   const token = authAccessToken || "";
   if (!url || !key || !token || !dataUrl) return { plausible: true, reason: "" };
   try {
@@ -3674,7 +3738,7 @@ async function submitProof() {
 
   let upload = null;
   try {
-    if (proofFile) upload = await uploadFileToStorage("bondbridge-proofs", proofFile);
+    if (proofFile) upload = await uploadFileToStorage(STORAGE_BUCKETS.proofs, proofFile);
   } catch (error) {
     toast(error.message || "Proof upload failed.");
     return;
@@ -3722,7 +3786,7 @@ async function saveProfile() {
         const response = await fetch(state.currentUser.profilePhoto);
         const blob = await response.blob();
         const file = new File([blob], "profile-photo.png", { type: blob.type || "image/png" });
-        const uploaded = await uploadFileToStorage("bondbridge-avatars", file);
+        const uploaded = await uploadFileToStorage(STORAGE_BUCKETS.avatars, file);
         state.currentUser.profilePhoto = uploaded.public_url || state.currentUser.profilePhoto;
       }
     } catch (error) {
@@ -3888,7 +3952,13 @@ async function buildChatAttachment(file) {
 
 async function uploadFileToStorage(bucket, file) {
   if (!file || !isSignedIn()) return null;
-  const maxBytes = bucket === "bondbridge-proofs" ? 10 * 1024 * 1024 : 5 * 1024 * 1024;
+  if (!STORAGE_BUCKET_VALUES.includes(bucket)) throw new Error("Unsupported storage bucket.");
+  const contentType = file.type || "application/octet-stream";
+  const allowedTypes = STORAGE_MIME_TYPES[bucket] || [];
+  if (allowedTypes.length && !allowedTypes.includes(contentType)) {
+    throw new Error("That file type is not supported for this upload.");
+  }
+  const maxBytes = bucket === STORAGE_BUCKETS.proofs ? 10 * 1024 * 1024 : 5 * 1024 * 1024;
   if (file.size > maxBytes) {
     throw new Error(`File must be ${Math.round(maxBytes / 1024 / 1024)}MB or smaller.`);
   }
@@ -3899,7 +3969,7 @@ async function uploadFileToStorage(bucket, file) {
     body: JSON.stringify({
       bucket,
       fileName: file.name,
-      contentType: file.type || "application/octet-stream",
+      contentType,
       dataUrl,
     }),
   });
@@ -3956,7 +4026,7 @@ async function sendMessage() {
       let attachmentPath = "";
       if (file && attachment) {
         try {
-          const uploaded = await uploadFileToStorage("bondbridge-chat", file);
+          const uploaded = await uploadFileToStorage(STORAGE_BUCKETS.chat, file);
           attachmentPath = uploaded?.path || "";
         } catch (_) {
           // Attachment stays local — not a fatal error
@@ -4068,7 +4138,7 @@ function exportData() {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = "bondbridge-local-data.json";
+  anchor.download = "kinora-local-data.json";
   anchor.click();
   URL.revokeObjectURL(url);
   toast("Local data exported.");
@@ -4085,15 +4155,16 @@ let supabaseClient = null;
 
 function getSupabase() {
   if (supabaseClient) return supabaseClient;
-  const url = window.BONDBRIDGE_SUPABASE_URL || "";
-  const key = window.BONDBRIDGE_SUPABASE_KEY || "";
+  KINORA.migrateAuthStorage?.();
+  const url = runtimeValue("supabaseUrl");
+  const key = runtimeValue("supabaseKey");
   if (!url || !key || !window.supabase || typeof window.supabase.createClient !== "function") return null;
   supabaseClient = window.supabase.createClient(url, key, {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: false,
-      storageKey: "bondbridge-auth",
+      storageKey: AUTH_STORAGE_KEY,
     },
     realtime: { params: { eventsPerSecond: 10 } },
   });
@@ -4117,7 +4188,7 @@ async function apiJson(path, options = {}) {
     return {
       ok: false,
       status: 0,
-      payload: { ok: false, message: "Can't reach BondBridge servers. Check your internet connection." },
+      payload: { ok: false, message: `Can't reach ${APP_NAME} servers. Check your internet connection.` },
     };
   }
   let body = {};
@@ -4168,7 +4239,7 @@ async function supabaseRoute(client, rawPath, method, body) {
     case "POST /api/identity/session":
       return { ok: true, provider: "supabase", message: "Proof review is handled inside the app." };
     case "POST /api/checkout":
-      return { ok: true, provider: "free", paid_api: false, message: "BondBridge is free." };
+      return { ok: true, provider: "free", paid_api: false, message: `${APP_NAME} is free.` };
     default:
       return { ok: false, message: "That feature isn't available yet." };
   }
@@ -4282,7 +4353,7 @@ async function sbSaveProfile(client, body) {
   const age = Math.min(90, Math.max(18, Number(body.age) || 18));
   const row = {
     id: user.id,
-    full_name: String(body.full_name || "").trim() || "BondBridge member",
+    full_name: String(body.full_name || "").trim() || `${APP_NAME} member`,
     gender: ["Male", "Female"].includes(body.gender) ? body.gender : "Male",
     age,
     country: String(body.country || "").trim() || "Not set",
@@ -4508,20 +4579,26 @@ async function sbAddProof(client, body) {
 async function sbUploadFile(client, body) {
   const user = await currentAuthUser(client);
   if (!user) return { ok: false, message: "You're signed out." };
-  const bucket = body.bucket || "bondbridge-chat";
+  const bucket = body.bucket || STORAGE_BUCKETS.chat;
+  if (!STORAGE_BUCKET_VALUES.includes(bucket)) return { ok: false, message: "Unsupported storage bucket." };
   const response = await fetch(body.dataUrl);
   const blob = await response.blob();
+  const contentType = body.contentType || blob.type || "application/octet-stream";
+  const allowedTypes = STORAGE_MIME_TYPES[bucket] || [];
+  if (allowedTypes.length && !allowedTypes.includes(contentType)) {
+    return { ok: false, message: "That file type is not supported for this upload." };
+  }
   const extension = (String(body.fileName || "file").split(".").pop() || "bin").toLowerCase().slice(0, 8);
   const objectPath = `${user.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extension}`;
 
   const { error } = await client.storage.from(bucket).upload(objectPath, blob, {
-    contentType: body.contentType || blob.type || "application/octet-stream",
+    contentType,
     upsert: false,
   });
   if (error) return { ok: false, message: error.message };
 
   let publicUrl = "";
-  if (bucket === "bondbridge-avatars") {
+  if (bucket === STORAGE_BUCKETS.avatars) {
     publicUrl = client.storage.from(bucket).getPublicUrl(objectPath).data?.publicUrl || "";
   }
   return { ok: true, path: objectPath, public_url: publicUrl, bucket };
@@ -4735,7 +4812,7 @@ function normalizeProfiles(rows = []) {
         purposes: purposes.length ? purposes : ["Friendship"],
         respectScore: row.respect_score ?? 100,
         verified: verified.length ? verified : ["Verified"],
-        about: row.bio || "Verified BondBridge member.",
+        about: row.bio || `Verified ${APP_NAME} member.`,
         connectionStyle: "Respectful and consent-first.",
         profilePhoto: row.profile_photo_url || "",
         status: row.is_suspended ? "suspended" : "active",
@@ -4942,7 +5019,7 @@ async function signupAccount() {
       signedIn: Boolean(authAccessToken),
       expiresAt: result.payload?.session?.expires_at || "",
     };
-    toast(`Welcome to BondBridge, ${state.currentUser.name.split(" ")[0]}! Complete your profile to get verified.`);
+    toast(`Welcome to ${APP_NAME}, ${state.currentUser.name.split(" ")[0]}! Complete your profile to get verified.`);
     state.view = "verify";
     state.verifyStep = "profile";
     startRealtime();
@@ -5508,7 +5585,7 @@ document.addEventListener("change", async (event) => {
     }
 
     try {
-      const upload = await uploadFileToStorage("bondbridge-avatars", file);
+      const upload = await uploadFileToStorage(STORAGE_BUCKETS.avatars, file);
       const publicUrl = upload?.public_url;
       if (!publicUrl) throw new Error("Upload did not return a link.");
       const saved = await apiJson("/api/story", {
@@ -5554,7 +5631,7 @@ window.addEventListener("beforeinstallprompt", (event) => {
 
 window.addEventListener("appinstalled", () => {
   installPromptEvent = null;
-  toast("BondBridge installed.");
+  toast(`${APP_NAME} installed.`);
   render();
 });
 
@@ -5571,7 +5648,7 @@ function startRealtime() {
   if (!client || realtimeChannel || !isSignedIn()) return;
 
   realtimeChannel = client
-    .channel("bondbridge-live")
+    .channel(REALTIME_CHANNEL_NAME)
     // New message arrives → show it immediately
     .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, (payload) => {
       handleIncomingMessage(payload.new).catch(() => {});

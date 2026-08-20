@@ -1,5 +1,5 @@
 -- ============================================================================
---  BondBridge — COMPLETE DATABASE SETUP
+--  Kinora — COMPLETE DATABASE SETUP
 --
 --  This is the ONLY SQL file you need to run. It replaces both
 --  supabase-schema.sql and supabase-setup-step2.sql.
@@ -167,12 +167,20 @@ grant select, insert, delete on public.webrtc_signals to authenticated;
 
 -- ── Indexes ──────────────────────────────────────────────────────────────────
 create index if not exists messages_connection_created_idx on public.messages (connection_id, created_at);
+create index if not exists messages_sender_idx             on public.messages (sender_id);
 create index if not exists connections_requester_idx       on public.connections (requester_id);
 create index if not exists connections_recipient_idx       on public.connections (recipient_id);
+create index if not exists family_reminders_user_idx       on public.family_reminders (user_id);
+create index if not exists reports_reporter_idx            on public.reports (reporter_id);
+create index if not exists reports_reported_user_idx       on public.reports (reported_user_id);
+create index if not exists reports_connection_idx          on public.reports (connection_id);
+create index if not exists verification_documents_user_idx on public.verification_documents (user_id);
 create index if not exists profiles_created_idx            on public.profiles (created_at desc);
 create index if not exists webrtc_rooms_host_idx           on public.webrtc_rooms (host_user_id);
 create index if not exists webrtc_rooms_guest_idx          on public.webrtc_rooms (guest_user_id);
 create index if not exists webrtc_signals_room_idx         on public.webrtc_signals (room_id, created_at);
+create index if not exists webrtc_signals_sender_idx       on public.webrtc_signals (sender_id);
+create index if not exists webrtc_signals_recipient_idx    on public.webrtc_signals (recipient_id);
 
 
 -- ── Policies: profiles ───────────────────────────────────────────────────────
@@ -232,7 +240,8 @@ with check ((select auth.uid()) in (requester_id, recipient_id));
 
 drop policy if exists "Users delete their own connections" on public.connections;
 create policy "Users delete their own connections"
-on public.connections for delete to authenticated
+on p
+ublic.connections for delete to authenticated
 using ((select auth.uid()) in (requester_id, recipient_id));
 
 
@@ -383,7 +392,7 @@ begin
   )
   values (
     new.id,
-    coalesce(nullif(trim(coalesce(meta->>'full_name','')),''), 'BondBridge member'),
+    coalesce(nullif(trim(coalesce(meta->>'full_name','')),''), 'Kinora member'),
     case when coalesce(meta->>'gender','') in ('Male','Female') then meta->>'gender' else 'Male' end,
     safe_age,
     coalesce(nullif(trim(coalesce(meta->>'country','')),''), 'Not set'),
@@ -404,6 +413,7 @@ exception when others then
   return new;   -- never block signup because of profile creation
 end;
 $$;
+revoke execute on function public.handle_new_user() from public, anon, authenticated;
 
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
@@ -441,32 +451,67 @@ set public = excluded.public,
     allowed_mime_types = excluded.allowed_mime_types;
 
 drop policy if exists "BondBridge avatars are publicly readable" on storage.objects;
-create policy "BondBridge avatars are publicly readable"
+drop policy if exists "BondBridge users upload own avatars" on storage.objects;
+drop policy if exists "BondBridge users update own avatars" on storage.objects;
+drop policy if exists "BondBridge users delete own avatars" on storage.objects;
+drop policy if exists "BondBridge users read own proof files" on storage.objects;
+drop policy if exists "BondBridge users upload own proof files" on storage.objects;
+drop policy if exists "BondBridge users update own proof files" on storage.objects;
+drop policy if exists "BondBridge users delete own proof files" on storage.objects;
+drop policy if exists "BondBridge users read own chat files" on storage.objects;
+drop policy if exists "BondBridge chat participants read shared files" on storage.objects;
+drop policy if exists "BondBridge users upload own chat files" on storage.objects;
+drop policy if exists "BondBridge users update own chat files" on storage.objects;
+drop policy if exists "BondBridge users delete own chat files" on storage.objects;
+drop policy if exists "Kinora avatars are publicly readable" on storage.objects;
+drop policy if exists "Kinora users upload own avatars" on storage.objects;
+drop policy if exists "Kinora users update own avatars" on storage.objects;
+drop policy if exists "Kinora users delete own avatars" on storage.objects;
+drop policy if exists "Kinora users read own proof files" on storage.objects;
+drop policy if exists "Kinora users upload own proof files" on storage.objects;
+drop policy if exists "Kinora users update own proof files" on storage.objects;
+drop policy if exists "Kinora users delete own proof files" on storage.objects;
+drop policy if exists "Kinora users read own chat files" on storage.objects;
+drop policy if exists "Kinora chat participants read shared files" on storage.objects;
+drop policy if exists "Kinora users upload own chat files" on storage.objects;
+drop policy if exists "Kinora users update own chat files" on storage.objects;
+drop policy if exists "Kinora users delete own chat files" on storage.objects;
+create policy "Kinora avatars are publicly readable"
 on storage.objects for select to public
 using (bucket_id = 'bondbridge-avatars');
 
-drop policy if exists "BondBridge users upload own avatars" on storage.objects;
-create policy "BondBridge users upload own avatars"
+create policy "Kinora users upload own avatars"
 on storage.objects for insert to authenticated
 with check (bucket_id = 'bondbridge-avatars' and (select auth.uid())::text = (storage.foldername(name))[1]);
 
-drop policy if exists "BondBridge users update own avatars" on storage.objects;
-create policy "BondBridge users update own avatars"
+create policy "Kinora users update own avatars"
 on storage.objects for update to authenticated
+using (bucket_id = 'bondbridge-avatars' and (select auth.uid())::text = (storage.foldername(name))[1])
+with check (bucket_id = 'bondbridge-avatars' and (select auth.uid())::text = (storage.foldername(name))[1]);
+
+create policy "Kinora users delete own avatars"
+on storage.objects for delete to authenticated
 using (bucket_id = 'bondbridge-avatars' and (select auth.uid())::text = (storage.foldername(name))[1]);
 
-drop policy if exists "BondBridge users read own proof files" on storage.objects;
-create policy "BondBridge users read own proof files"
-on storage.objects for select to authenticated
+create policy "Kinora users read own proof files"
+on storage.objects for select to authenticat
+ed
 using (bucket_id = 'bondbridge-proofs' and (select auth.uid())::text = (storage.foldername(name))[1]);
 
-drop policy if exists "BondBridge users upload own proof files" on storage.objects;
-create policy "BondBridge users upload own proof files"
+create policy "Kinora users upload own proof files"
 on storage.objects for insert to authenticated
 with check (bucket_id = 'bondbridge-proofs' and (select auth.uid())::text = (storage.foldername(name))[1]);
 
-drop policy if exists "BondBridge chat participants read shared files" on storage.objects;
-create policy "BondBridge chat participants read shared files"
+create policy "Kinora users update own proof files"
+on storage.objects for update to authenticated
+using (bucket_id = 'bondbridge-proofs' and (select auth.uid())::text = (storage.foldername(name))[1])
+with check (bucket_id = 'bondbridge-proofs' and (select auth.uid())::text = (storage.foldername(name))[1]);
+
+create policy "Kinora users delete own proof files"
+on storage.objects for delete to authenticated
+using (bucket_id = 'bondbridge-proofs' and (select auth.uid())::text = (storage.foldername(name))[1]);
+
+create policy "Kinora chat participants read shared files"
 on storage.objects for select to authenticated
 using (
   bucket_id = 'bondbridge-chat'
@@ -482,11 +527,20 @@ using (
   )
 );
 
-drop policy if exists "BondBridge users upload own chat files" on storage.objects;
-create policy "BondBridge users upload own chat files"
+create policy "Kinora users upload own chat files"
 on storage.objects for insert to authenticated
 with check (bucket_id = 'bondbridge-chat' and (select auth.uid())::text = (storage.foldername(name))[1]);
 
+create policy "Kinora users update own chat files"
+on storage.objects for update to authenticated
+using (bucket_id = 'bondbridge-chat' and (select auth.uid())::text = (storage.foldername(name))[1])
+with check (bucket_id = 'bondbridge-chat' and (select auth.uid())::text = (storage.foldername(name))[1]);
+
+create policy "Kinora users delete own chat files"
+on storage.objects for delete to authenticated
+using (bucket_id = 'bondbridge-chat' and (select auth.uid())::text = (storage.foldername(name))[1]);
+
 
 -- ── Done ─────────────────────────────────────────────────────────────────────
-select 'BondBridge is ready. Chat, video, profiles and realtime are live.' as status;
+select 'Kinora is ready. Chat, video, profiles and realtime are live.' as status;
+

@@ -1,4 +1,4 @@
-// BondBridge AI Coach — Supabase Edge Function
+// Kinora AI Coach — Supabase Edge Function
 //
 // Why this exists: the Groq API key is a SECRET. If it sat in the app's
 // JavaScript, anyone could open View Source on the public site, copy it, and
@@ -36,7 +36,7 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const SYSTEM_PROMPT = `You are BondBridge Coach, helping people write warm, respectful,
+const SYSTEM_PROMPT = `You are Kinora Coach, helping people write warm, respectful,
 honest messages to new connections — study partners, friends, professional contacts,
 or family they've lost touch with.
 
@@ -254,7 +254,8 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, message: "Invalid request." }, 400);
   }
 
-  if (body?.type === "turn-credentials") {
+  if (bo
+dy?.type === "turn-credentials") {
     return handleTurnCredentials();
   }
 
@@ -271,3 +272,4 @@ Deno.serve(async (req: Request) => {
   }
   return handleCoach(apiKey, body);
 });
+

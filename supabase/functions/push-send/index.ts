@@ -1,13 +1,13 @@
-// BondBridge Push Sender — Supabase Edge Function
+// Kinora Push Sender — Supabase Edge Function
 //
 // Why this exists: a message or an incoming call needs to reach a person
-// even if BondBridge isn't open in their browser. Postgres triggers
+// even if Kinora isn't open in their browser. Postgres triggers
 // (see the push-notification SQL setup) call this function the instant a
 // new message or call row is written, using pg_net — which runs inside the
 // database and doesn't care whether anyone's tab is open. This function then
 // looks up that person's saved push subscriptions and sends a real Web Push
 // notification to their device, which the browser's service worker shows
-// even with BondBridge fully closed.
+// even with Kinora fully closed.
 //
 // SETUP (all in the Supabase dashboard, no terminal needed):
 //   1. Edge Functions → Create function → name it exactly: push-send
@@ -59,7 +59,7 @@ Deno.serve(async (req) => {
     console.error("push-send: VAPID keys not configured");
     return json({ ok: false, message: "Push isn't configured yet." }, 200);
   }
-  webpush.setVapidDetails("mailto:support@bondbridge.app", vapidPublicKey, vapidPrivateKey);
+  webpush.setVapidDetails("mailto:support@kinora.app", vapidPublicKey, vapidPrivateKey);
 
   let body: Record<string, unknown> = {};
   try {
@@ -73,6 +73,10 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+  if (!supabaseUrl || !serviceRoleKey) {
+    console.error("push-send: Supabase admin credentials not configured");
+    return json({ ok: false, message: "Push admin credentials are not configured." }, 200);
+  }
   const admin = createClient(supabaseUrl, serviceRoleKey);
 
   const { data: subs, error } = await admin
@@ -89,9 +93,9 @@ Deno.serve(async (req) => {
   }
 
   const payload = JSON.stringify({
-    title: String(body?.title || "BondBridge"),
+    title: String(body?.title || "Kinora"),
     body: String(body?.body || ""),
-    tag: String(body?.tag || "bondbridge"),
+    tag: String(body?.tag || "kinora"),
     requireInteraction: Boolean(body?.requireInteraction),
     data: body?.data || {},
   });
@@ -129,3 +133,4 @@ Deno.serve(async (req) => {
 
   return json({ ok: true, sent, pruned: staleIds.length });
 });
+

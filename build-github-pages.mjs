@@ -6,10 +6,14 @@ const output = path.join(root, "dist", "github-pages");
 // Bump this on every deploy so returning users get fresh code instead of a
 // stale service-worker cache.
 const buildId = `v${Math.floor(Date.now() / 1000)}`;
+const APP_NAME = "Kinora";
+const APP_FULL_NAME = "Kinora Verified";
+const APP_DESCRIPTION = "Verified respectful connections, family reminders, private chat, and free browser calls.";
 
-const [html, css, js, supabaseLib] = await Promise.all([
+const [html, css, configJs, js, supabaseLib] = await Promise.all([
   readFile(path.join(root, "index.html"), "utf8"),
   readFile(path.join(root, "styles.css"), "utf8"),
+  readFile(path.join(root, "config.js"), "utf8"),
   readFile(path.join(root, "app.js"), "utf8"),
   readFile(path.join(root, "supabase-lib.js"), "utf8"),
 ]);
@@ -19,16 +23,17 @@ const page = html
   .replace('href="/app-icon"', 'href="./icon.svg"')
   .replace('href="/app-icon"', 'href="./icon.svg"')
   .replace('<link rel="stylesheet" href="./styles.css" />', `<link rel="stylesheet" href="./styles.css?${buildId}" />`)
-  // Supabase config already lives in index.html; just cache-bust the app bundle
+  // Supabase config already lives in index.html; just cache-bust the bundles
+  .replace('<script src="./config.js"></script>', `<script src="./config.js?${buildId}"></script>`)
   .replace('<script src="./app.js"></script>', `<script src="./app.js?${buildId}"></script>`);
 
 const pagesJs = js.replace('navigator.serviceWorker.register("/service-worker")', 'navigator.serviceWorker.register("./sw.js")');
 
 const manifest = {
   id: "./",
-  name: "BondBridge Verified",
-  short_name: "BondBridge",
-  description: "Verified respectful connections, family reminders, chat, and free browser video.",
+  name: APP_FULL_NAME,
+  short_name: APP_NAME,
+  description: APP_DESCRIPTION,
   start_url: "./",
   scope: "./",
   display: "standalone",
@@ -78,7 +83,7 @@ const icon = `
 `.trim();
 
 const serviceWorker = `
-const CACHE_NAME = "bondbridge-${buildId}";
+const CACHE_NAME = "kinora-${buildId}";
 const APP_SHELL = ["./", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", (event) => {
@@ -108,23 +113,23 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(caches.match(event.request).then((cached) => cached || fetch(event.request)));
 });
 
-// Real background push — this fires even if BondBridge isn't open anywhere,
+// Real background push — this fires even if Kinora isn't open anywhere,
 // as long as the browser/OS lets the service worker wake up for it. This is
 // what makes a new message "ping" and an incoming call "ring" like a normal
-// messaging app instead of only working while a BondBridge tab is focused.
+// messaging app instead of only working while a Kinora tab is focused.
 self.addEventListener("push", (event) => {
   let data = {};
   try {
     data = event.data ? event.data.json() : {};
   } catch {
-    data = { title: "BondBridge", body: event.data ? event.data.text() : "" };
+    data = { title: "${APP_NAME}", body: event.data ? event.data.text() : "" };
   }
-  const title = data.title || "BondBridge";
+  const title = data.title || "${APP_NAME}";
   const options = {
     body: data.body || "",
     icon: "./icon.svg",
     badge: "./icon.svg",
-    tag: data.tag || "bondbridge",
+    tag: data.tag || "kinora",
     renotify: true,
     requireInteraction: Boolean(data.requireInteraction),
     data: data.data || {},
@@ -151,6 +156,7 @@ await mkdir(output, { recursive: true });
 await Promise.all([
   writeFile(path.join(output, "index.html"), page),
   writeFile(path.join(output, "styles.css"), css),
+  writeFile(path.join(output, "config.js"), configJs),
   writeFile(path.join(output, "app.js"), pagesJs),
   writeFile(path.join(output, "supabase-lib.js"), supabaseLib),
   writeFile(path.join(output, "manifest.webmanifest"), JSON.stringify(manifest, null, 2)),
@@ -158,3 +164,4 @@ await Promise.all([
   writeFile(path.join(output, "sw.js"), serviceWorker),
   writeFile(path.join(output, ".nojekyll"), ""),
 ]);
+

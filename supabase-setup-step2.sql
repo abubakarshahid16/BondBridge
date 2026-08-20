@@ -1,5 +1,5 @@
 -- ============================================================================
--- BondBridge — Setup Step 2
+-- Kinora — Setup Step 2
 -- Run this AFTER supabase-schema.sql, in Supabase → SQL Editor → New query
 -- This makes the app actually work between real users.
 -- ============================================================================
@@ -169,4 +169,5 @@ create index if not exists profiles_created_idx
 
 
 -- ── Done ─────────────────────────────────────────────────────────────────────
-select 'BondBridge setup complete. Realtime chat, video and profiles are live.' as status;
+select 'Kinora setup complete. Realtime chat, video and profiles are live.' as status;
+

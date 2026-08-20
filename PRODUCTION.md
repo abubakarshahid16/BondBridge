@@ -1,33 +1,87 @@
-# BondBridge Production Setup
+# Kinora Production Setup
 
-The app is deployed on OpenAI Sites and now uses a free launch stack. The only required runtime configuration is Supabase public project config.
+Kinora runs as an installable PWA backed by Supabase. GitHub Pages is the public deployment path.
+
+## Current Production State
+
+- Supabase project: `fpbodwjgypxzqpstwcvo`
+- Supabase status checked during this overhaul: active and healthy
+- GitHub Pages branch: `gh-pages`
+- Expected GitHub Pages app URL: `https://abubakarshahid16.github.io/Kindred/`
 
 ## Required Services
 
-- Supabase free Auth and Postgres for accounts, profiles, connections, messages, family reminders, reports, proof queues, and WebRTC signaling.
+- Supabase Auth, Postgres, Realtime, and Storage.
 - Browser-native WebRTC for camera, microphone, and screen share.
-- Local safety and coach logic for foul-language blocking, respectful rewrites, and message drafts.
+- Supabase Edge Function `coach` for optional AI coach, proof sanity checks, and TURN credentials.
+- Supabase Edge Function `push-send` for Web Push notifications.
 
-Video rooms are not simulated. `POST /api/video/room` requires a Supabase access token and inserts a real `webrtc_rooms` row. RLS only permits signed-in users with verified identity, role proof, profile truth, and one-account status to host or join live rooms.
+Core usage does not require paid APIs. Groq and TURN provider keys are optional enhancements.
+
+## Environment Variables
+
+Preferred browser globals:
+
+- `KINORA_SUPABASE_URL`
+- `KINORA_SUPABASE_KEY`
+- `KINORA_AI_URL`
+- `KINORA_TURN_URL`
+- `KINORA_VAPID_PUBLIC_KEY`
+
+Push Edge Function secrets:
+
+- `PUSH_FUNCTION_SECRET`
+- `VAPID_PUBLIC_KEY`
+- `VAPID_PRIVATE_KEY`
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+Optional coach/TURN secrets:
+
+- `GROQ_API_KEY`
+- `METERED_API_KEY`
+- `METERED_APP_NAME`
 
 ## Database
 
-1. Create or use the connected Supabase project.
-2. Run `supabase-schema.sql` in the Supabase SQL editor.
-3. Confirm the schema created these Supabase Storage buckets: public `bondbridge-avatars`, private `bondbridge-proofs`, and private `bondbridge-chat`.
-4. Configure email/password auth and production SMTP before a public launch.
+For a fresh project, run `RUN-THIS-IN-SUPABASE.sql`, then `RUN-THIS-FOR-PUSH-NOTIFICATIONS.sql`.
 
-## Sites Environment Variables
+For the existing production project, review and apply:
 
-Use `.env.example` as the exact key list. No paid provider keys are needed.
+```sql
+supabase/migrations/202608210001_kinora_security_compatibility.sql
+```
 
-Minimum launch keys:
+This migration keeps production bucket IDs stable:
 
-- `SUPABASE_URL`
-- `SUPABASE_PUBLISHABLE_KEY`
+- `bondbridge-avatars`
+- `bondbridge-proofs`
+- `bondbridge-chat`
 
-## Server Routes
+Do not rename these buckets until all existing object paths and deployed clients have been migrated.
 
+## Verification After Deploy
+
+1. Run `npm run check`.
+2. Run `npm run build`.
+3. Run `npm run build:github-pages`.
+4. Serve `dist/github-pages` and verify the PWA manifest, install button, service worker, and screenshots.
+5. Run Supabase security and performance advisors after applying the migration.
+6. Test two real accounts on two devices:
+   - signup/login
+   - profile save
+   - proof upload
+   - discovery
+   - connection request/accept
+   - chat message
+   - attachment upload
+   - push subscription
+   - voice call
+   - video call
+
+## Public API Routes In The Sites Worker
+
+- `GET /health`
 - `GET /api/status`
 - `GET /api/profiles`
 - `GET /api/me`
@@ -50,21 +104,14 @@ Minimum launch keys:
 - `POST /api/identity/session`
 - `POST /api/video/room`
 - `POST /api/moderate`
-- `GET /health`
 - `GET /manifest`
 - `GET /service-worker`
 - `GET /app-icon`
 
-## Launch Gate
+## Operational Notes
 
-The Launch page shows the free stack readiness. It should report connected when Supabase public config is present, and it should never ask for paid model, checkout, identity, or video API keys.
+- Verification approval, report resolution, suspension, and restore actions should stay in a protected operator workflow or Supabase admin console.
+- The public app must not expose self-approval controls.
+- Keep leaked-password protection enabled in Supabase Auth before public promotion.
+- TURN relay is recommended before promising reliable calls across strict mobile networks, corporate Wi-Fi, or carrier-grade NAT.
 
-## Installable App
-
-The deployed site is an installable PWA. Users can install it from the in-app Install button when the browser supports native prompts, or from the browser menu on iPhone and desktop browsers.
-
-## Data Integrity
-
-The app now starts with no fake users, chats, reports, communities, or family reminders. Real users must create an account, add their own profile details, submit proof, and become approved in Supabase before they appear in discovery. Public discovery requires `identity_status`, `role_status`, `gender_status`, and `uniqueness_status` to all be `verified`.
-
-Proof approval, user suspension, report resolution, and verification status changes should be handled by a protected operator workflow or Supabase admin console. The public app does not expose self-approval controls.

@@ -243,6 +243,29 @@ button {
   cursor: pointer;
 }
 
+button:disabled,
+[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
+a:focus-visible,
+button:focus-visible,
+[role="button"]:focus-visible,
+.input:focus-visible,
+.select:focus-visible,
+.textarea:focus-visible {
+  outline: 3px solid rgba(64, 93, 230, 0.34);
+  outline-offset: 3px;
+}
+
+button,
+.button,
+.icon-button,
+.nav-button,
+.settings-row {
+  -webkit-tap-highlight-color: transparent;
+}
+
 .app-shell {
   width: min(100%, var(--shell-max));
   min-height: 100dvh;
@@ -571,7 +594,8 @@ button {
   font-weight: 820;
 }
 
-.mini-ring > span {
+.mini-ring > spa
+n {
   width: 42px;
   height: 42px;
 }
@@ -1065,7 +1089,7 @@ button {
     #f8fbff;
 }
 
-.live-pill {
+.video-tile .live-pill {
   position: absolute;
   left: 12px;
   top: 12px;
@@ -1300,6 +1324,7 @@ button {
   background: var(--blue);
   font-weight: 800;
 }
+
 
 .avatar.big {
   width: 96px;
@@ -1580,6 +1605,7 @@ button {
 
 .icon-button {
   width: 38px;
+  min-width: 38px;
   padding: 8px;
 }
 
@@ -1611,6 +1637,11 @@ button {
   background: var(--rose);
 }
 
+.button:disabled,
+.icon-button:disabled {
+  opacity: 0.62;
+}
+
 .button.ghost {
   border-color: transparent;
   background: transparent;
@@ -1638,6 +1669,7 @@ button {
   color: var(--ink);
   background: #ffffff;
   padding: 9px 10px;
+  overflow-wrap: anywhere;
 }
 
 .textarea {
@@ -1875,6 +1907,7 @@ button {
 }
 
 .live-pill {
+  position: static;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1970,7 +2003,8 @@ button {
   place-items: center;
   width: 48px;
   height: 48px;
-  border-radius: 50%;
+  border-radius: 50%
+;
   color: #ffffff;
   background: var(--grad);
 }
@@ -2638,7 +2672,8 @@ button {
 .quick-add-grid,
 .coach-input-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-templat
+e-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -3327,6 +3362,7 @@ button {
     width: 100%;
   }
 
+
   .profile-reel,
   .community-reel,
   .metric-strip {
@@ -3921,6 +3957,7 @@ html[data-theme="dark"] .auth-signed-in-card { background: #0a0a0a; border-color
 .welcome-inner h2 { margin: 0 0 4px; font-size: 1.2rem; }
 .welcome-inner p { margin: 0; color: var(--muted); font-size: 0.9rem; }
 
+
 /* ─── Coach thinking animation ──────────────────────────────────────────────── */
 .coach-thinking {
   display: flex;
@@ -4073,3 +4110,4 @@ html[data-theme="dark"] .settings-block { background: #0a0a0a; border-color: #22
   flex-shrink: 0;
 }
 .nav-button-icon:hover { background: var(--line); color: var(--ink); }
+

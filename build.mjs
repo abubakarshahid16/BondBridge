@@ -4,30 +4,59 @@ import path from "node:path";
 const root = process.cwd();
 const dist = path.join(root, "dist");
 const serverDir = path.join(dist, "server");
-const openaiDir = path.join(dist, ".openai");
 
-const [html, css, js, hosting] = await Promise.all([
+const APP_NAME = "Kinora";
+const APP_FULL_NAME = "Kinora Verified";
+const APP_DESCRIPTION = "Verified respectful connections, family reminders, private chat, and free browser calls.";
+const STORAGE_BUCKETS = Object.freeze({
+  avatars: "bondbridge-avatars",
+  proofs: "bondbridge-proofs",
+  chat: "bondbridge-chat",
+});
+const STORAGE_MIME_TYPES = Object.freeze({
+  [STORAGE_BUCKETS.avatars]: ["image/jpeg", "image/png", "image/webp", "image/gif"],
+  [STORAGE_BUCKETS.proofs]: ["image/jpeg", "image/png", "image/webp", "application/pdf"],
+  [STORAGE_BUCKETS.chat]: [
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ],
+});
+
+const [html, css, configJs, js] = await Promise.all([
   readFile(path.join(root, "index.html"), "utf8"),
   readFile(path.join(root, "styles.css"), "utf8"),
+  readFile(path.join(root, "config.js"), "utf8"),
   readFile(path.join(root, "app.js"), "utf8"),
-  readFile(path.join(root, ".openai", "hosting.json"), "utf8"),
 ]);
 
 const sourceFilePaths = [
   ".env.example",
   ".github/workflows/deploy-pages.yml",
-  ".github/workflows/sync-live-source.yml",
   ".gitignore",
-  ".openai/hosting.json",
+  "RUN-THIS-FOR-PUSH-NOTIFICATIONS.sql",
+  "RUN-THIS-IN-SUPABASE.sql",
   "PRODUCTION.md",
   "README.md",
+  "SETUP.md",
   "app.js",
   "build-github-pages.mjs",
   "build.mjs",
+  "config.js",
+  "docs/ARCHITECTURE.md",
+  "docs/MIGRATION.md",
   "index.html",
   "package.json",
   "styles.css",
+  "supabase/functions/coach/index.ts",
+  "supabase/functions/push-send/index.ts",
+  "supabase/migrations/202608210001_kinora_security_compatibility.sql",
   "supabase-schema.sql",
+  "supabase-setup-step2.sql",
 ];
 
 const sourceFiles = Object.fromEntries(
@@ -41,13 +70,14 @@ const sourceFiles = Object.fromEntries(
 
 const page = html
   .replace('<link rel="stylesheet" href="./styles.css" />', `<style>${css}</style>`)
+  .replace('<script src="./config.js"></script>', `<script>${configJs}</script>`)
   .replace('<script src="./app.js"></script>', `<script>${js}</script>`);
 
 const pwaManifest = {
   id: "/",
-  name: "BondBridge Verified",
-  short_name: "BondBridge",
-  description: "Verified respectful connections, family reminders, chat, and free browser video.",
+  name: APP_FULL_NAME,
+  short_name: APP_NAME,
+  description: APP_DESCRIPTION,
   start_url: "/",
   scope: "/",
   display: "standalone",
@@ -98,7 +128,7 @@ const pwaIcon = `
 `.trim();
 
 const serviceWorker = `
-const CACHE_NAME = "bondbridge-pwa-v9";
+const CACHE_NAME = "kinora-pwa-v10";
 const APP_SHELL = ["/", "/manifest", "/app-icon"];
 
 self.addEventListener("install", (event) => {
@@ -139,7 +169,7 @@ self.addEventListener("fetch", (event) => {
 `.trim();
 
 const sourcePackage = {
-  app: "BondBridge Verified",
+  app: APP_FULL_NAME,
   generated_at: new Date().toISOString(),
   files: sourceFiles,
 };
@@ -150,28 +180,32 @@ const manifest = ${JSON.stringify(pwaManifest)};
 const iconSvg = ${JSON.stringify(pwaIcon)};
 const serviceWorker = ${JSON.stringify(serviceWorker)};
 const sourcePackage = ${JSON.stringify(sourcePackage)};
+const APP_NAME = ${JSON.stringify(APP_NAME)};
+const APP_FULL_NAME = ${JSON.stringify(APP_FULL_NAME)};
+const STORAGE_BUCKETS = ${JSON.stringify(STORAGE_BUCKETS)};
+const STORAGE_MIME_TYPES = ${JSON.stringify(STORAGE_MIME_TYPES)};
 
 const providers = [
   {
     key: "authData",
     name: "Auth + database",
     detail: "Supabase free Auth, profile sync, RLS, and user-owned records.",
-    env: "SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY",
-    required: ["SUPABASE_URL", ["SUPABASE_PUBLISHABLE_KEY", "SUPABASE_ANON_KEY"]],
+    env: "KINORA_SUPABASE_URL/KINORA_SUPABASE_KEY or SUPABASE_URL/SUPABASE_PUBLISHABLE_KEY",
+    required: [["KINORA_SUPABASE_URL", "SUPABASE_URL"], ["KINORA_SUPABASE_KEY", "SUPABASE_PUBLISHABLE_KEY", "SUPABASE_ANON_KEY"]],
   },
   {
     key: "freeVideo",
     name: "Free live video",
     detail: "Browser WebRTC, camera, microphone, screen share, and Supabase signaling tables.",
     env: "Browser MediaDevices + Supabase RLS",
-    required: ["SUPABASE_URL", ["SUPABASE_PUBLISHABLE_KEY", "SUPABASE_ANON_KEY"]],
+    required: [["KINORA_SUPABASE_URL", "SUPABASE_URL"], ["KINORA_SUPABASE_KEY", "SUPABASE_PUBLISHABLE_KEY", "SUPABASE_ANON_KEY"]],
   },
   {
     key: "identity",
     name: "Free proof review",
     detail: "Student ID, transcript, work proof, and one-account evidence stored for manual review.",
     env: "Supabase verification_documents",
-    required: ["SUPABASE_URL", ["SUPABASE_PUBLISHABLE_KEY", "SUPABASE_ANON_KEY"]],
+    required: [["KINORA_SUPABASE_URL", "SUPABASE_URL"], ["KINORA_SUPABASE_KEY", "SUPABASE_PUBLISHABLE_KEY", "SUPABASE_ANON_KEY"]],
   },
   {
     key: "ai",
@@ -251,8 +285,8 @@ function notConfigured(service, missing) {
 }
 
 function supabaseConfig(env) {
-  const url = env.SUPABASE_URL;
-  const publishable = env.SUPABASE_PUBLISHABLE_KEY || env.SUPABASE_ANON_KEY;
+  const url = env.KINORA_SUPABASE_URL || env.SUPABASE_URL;
+  const publishable = env.KINORA_SUPABASE_KEY || env.SUPABASE_PUBLISHABLE_KEY || env.SUPABASE_ANON_KEY;
   if (!url || !publishable) return null;
   return {
     url: String(url).replace(/\\/$/, ""),
@@ -359,7 +393,8 @@ async function authenticate(request, env) {
   if (!config) {
     return {
       ok: false,
-      response: notConfigured("supabase-auth", ["SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY"]),
+      response: notConfigured("supabase-auth", ["KINORA_SUPABASE_URL or SUPABASE_URL", "KINORA_SUPABASE_KEY or SUPABASE_PUBLISHABLE_KEY"]),
+
     };
   }
   const accessToken = bearerToken(request);
@@ -431,7 +466,7 @@ function roomCode() {
 
 async function listProfiles(request, env) {
   const config = supabaseConfig(env);
-  if (!config) return notConfigured("live-profiles", ["SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY"]);
+  if (!config) return notConfigured("live-profiles", ["KINORA_SUPABASE_URL or SUPABASE_URL", "KINORA_SUPABASE_KEY or SUPABASE_PUBLISHABLE_KEY"]);
 
   const query = new URLSearchParams({
     select: publicProfileSelect(),
@@ -474,7 +509,7 @@ async function upsertSignupProfile(config, body, authPayload) {
     },
     body: JSON.stringify({
       id: user.id,
-      full_name: body.name || user.email || "New BondBridge user",
+      full_name: body.name || user.email || "New " + APP_NAME + " user",
       gender: body.gender,
       age: Number(body.age),
       country: body.country || "",
@@ -502,15 +537,14 @@ async function createCheckout(request, env) {
     paid_api: false,
     plan: String(body.plan || "founder-free"),
     billing_enabled: false,
-    message: "Paid checkout is intentionally disabled. BondBridge can launch on a free beta or collect payments later without adding paid infrastructure APIs.",
+    message: "Paid checkout is intentionally disabled. " + APP_NAME + " can launch on a free beta or collect payments later without adding paid infrastructure APIs.",
   });
 }
 
 async function createIdentitySession(request, env) {
   const body = await readJson(request);
-  const url = env.SUPABASE_URL;
-  const publishable = env.SUPABASE_PUBLISHABLE_KEY || env.SUPABASE_ANON_KEY;
-  if (!url || !publishable) return notConfigured("free-proof-review", ["SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY"]);
+  const config = supabaseConfig(env);
+  if (!config) return notConfigured("free-proof-review", ["KINORA_SUPABASE_URL or SUPABASE_URL", "KINORA_SUPABASE_KEY or SUPABASE_PUBLISHABLE_KEY"]);
   return json({
     ok: true,
     provider: "supabase-manual-proof-review",
@@ -544,7 +578,7 @@ async function saveMyProfile(request, env) {
   const body = await readJson(request);
   const payload = {
     id: auth.user.id,
-    full_name: textValue(body.full_name || body.name, auth.user.email || "BondBridge user"),
+    full_name: textValue(body.full_name || body.name, auth.user.email || APP_NAME + " user"),
     gender: textValue(body.gender),
     age: Number(body.age),
     country: textValue(body.country),
@@ -581,15 +615,19 @@ async function uploadStorageFile(request, env) {
   if (!auth.ok) return auth.response;
   const body = await readJson(request);
   const bucket = textValue(body.bucket);
-  const allowedBuckets = ["bondbridge-avatars", "bondbridge-proofs", "bondbridge-chat"];
+  const allowedBuckets = Object.values(STORAGE_BUCKETS);
   if (!allowedBuckets.includes(bucket)) return json({ ok: false, message: "Unsupported storage bucket." }, 400);
+  const contentType = textValue(body.contentType, "application/octet-stream");
+  const allowedTypes = STORAGE_MIME_TYPES[bucket] || [];
+  if (allowedTypes.length && !allowedTypes.includes(contentType)) {
+    return json({ ok: false, message: "That file type is not supported for this upload." }, 415);
+  }
   const bytes = dataUrlToBytes(body.dataUrl);
   if (!bytes) return json({ ok: false, message: "Upload must be sent as a base64 data URL." }, 400);
-  const maxBytes = bucket === "bondbridge-proofs" ? 10 * 1024 * 1024 : 5 * 1024 * 1024;
+  const maxBytes = bucket === STORAGE_BUCKETS.proofs ? 10 * 1024 * 1024 : 5 * 1024 * 1024;
   if (bytes.byteLength > maxBytes) return json({ ok: false, message: "File is too large for the free beta upload limit." }, 413);
   const fileName = Date.now() + "-" + safeStorageName(body.fileName);
   const path = auth.user.id + "/" + fileName;
-  const contentType = textValue(body.contentType, "application/octet-stream");
   const response = await fetch(auth.config.url + "/storage/v1/object/" + bucket + "/" + path, {
     method: "POST",
     headers: {
@@ -599,7 +637,7 @@ async function uploadStorageFile(request, env) {
     body: bytes,
   });
   const payload = await response.json().catch(() => ({}));
-  const publicUrl = bucket === "bondbridge-avatars"
+  const publicUrl = bucket === STORAGE_BUCKETS.avatars
     ? auth.config.url + "/storage/v1/object/public/" + bucket + "/" + path
     : "";
   return json({
@@ -641,7 +679,8 @@ async function submitProofDocument(request, env) {
 }
 
 async function listConnections(request, env) {
-  const auth = await authenticate(request, env);
+  const au
+th = await authenticate(request, env);
   if (!auth.ok) return auth.response;
   const query = new URLSearchParams({
     select: "*",
@@ -765,7 +804,7 @@ async function listMessages(request, env) {
         payload.map(async (row) => ({
           ...row,
           attachment_public_url: row.attachment_url
-            ? await signedStorageUrl(auth.config, auth.accessToken, "bondbridge-chat", row.attachment_url)
+            ? await signedStorageUrl(auth.config, auth.accessToken, STORAGE_BUCKETS.chat, row.attachment_url)
             : "",
         })),
       )
@@ -900,7 +939,8 @@ async function createReport(request, env) {
   const row = {
     reporter_id: auth.user.id,
     reported_user_id: textValue(body.reported_user_id) || null,
-    connection_id: textValue(body.connection_id) || null,
+    con
+nection_id: textValue(body.connection_id) || null,
     reason,
     status: "open",
   };
@@ -921,7 +961,7 @@ async function createReport(request, env) {
 
 async function createVideoRoom(request, env) {
   const config = supabaseConfig(env);
-  if (!config) return notConfigured("free-video-signaling", ["SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY"]);
+  if (!config) return notConfigured("free-video-signaling", ["KINORA_SUPABASE_URL or SUPABASE_URL", "KINORA_SUPABASE_KEY or SUPABASE_PUBLISHABLE_KEY"]);
   const accessToken = bearerToken(request);
   if (!accessToken) {
     return json(
@@ -990,7 +1030,7 @@ async function createVideoRoom(request, env) {
 async function signup(request, env) {
   const body = await readJson(request);
   const config = supabaseConfig(env);
-  if (!config) return notConfigured("supabase-auth", ["SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY"]);
+  if (!config) return notConfigured("supabase-auth", ["KINORA_SUPABASE_URL or SUPABASE_URL", "KINORA_SUPABASE_KEY or SUPABASE_PUBLISHABLE_KEY"]);
   if (!body.email || !body.password) return json({ ok: false, message: "Email and password are required." }, 400);
 
   const response = await fetch(config.url + "/auth/v1/signup", {
@@ -1028,7 +1068,7 @@ async function signup(request, env) {
 async function login(request, env) {
   const body = await readJson(request);
   const config = supabaseConfig(env);
-  if (!config) return notConfigured("supabase-auth", ["SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY"]);
+  if (!config) return notConfigured("supabase-auth", ["KINORA_SUPABASE_URL or SUPABASE_URL", "KINORA_SUPABASE_KEY or SUPABASE_PUBLISHABLE_KEY"]);
   if (!body.email || !body.password) return json({ ok: false, message: "Email and password are required." }, 400);
 
   const response = await fetch(config.url + "/auth/v1/token?grant_type=password", {
@@ -1117,14 +1157,14 @@ export default {
     }
 
     if (url.pathname === "/health") {
-      return json({ ok: true, app: "BondBridge Verified", api: true, free_stack: true });
+      return json({ ok: true, app: APP_FULL_NAME, api: true, free_stack: true });
     }
 
     if (url.pathname === "/api/status") {
       const services = serviceStatus(env);
       return json({
         ok: true,
-        app: "BondBridge Verified",
+        app: APP_FULL_NAME,
         mode: "production-worker",
         services,
         ready: services.every((service) => service.ready),
@@ -1170,6 +1210,5 @@ export default {
 
 await rm(dist, { recursive: true, force: true });
 await mkdir(serverDir, { recursive: true });
-await mkdir(openaiDir, { recursive: true });
 await writeFile(path.join(serverDir, "index.js"), worker);
-await writeFile(path.join(openaiDir, "hosting.json"), hosting);
+

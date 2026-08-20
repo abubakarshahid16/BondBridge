@@ -1,11 +1,12 @@
 {
-  "name": "bondbridge-verified",
+  "name": "kinora-verified",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
     "build:github-pages": "node build-github-pages.mjs",
+    "check": "node --check app.js && node --check config.js && node --check build.mjs && node --check build-github-pages.mjs",
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
@@ -13,3 +14,4 @@
   },
   "devDependencies": {}
 }
+
