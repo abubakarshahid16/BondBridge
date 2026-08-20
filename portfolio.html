@@ -132,14 +132,21 @@
         if (/api|fastapi|pipeline|automation|github|warehouse|system|scraper|integration/.test(text)) return "systems";
         return "product";
       };
+      const privateProject = {
+        name: "Delta-Lake-Lakehouse-",
+        description: "Private lakehouse architecture project using Delta Lake, Spark, and Airflow orchestration.",
+        category: "ml",
+        private: true,
+        html_url: "https://github.com/abubakarshahid16/Delta-Lake-Lakehouse-",
+      };
       const renderCatalog = (filter = "all") => {
         const visible = repositories.filter((repo) => filter === "all" || repo.category === filter);
         catalogGrid.innerHTML = visible.map((repo) => `
           <article class="catalog-card">
-            <div class="catalog-card-top"><span class="repo-kind">${repo.category === "ml" ? "ML / data" : repo.category === "systems" ? "Systems" : "Product"}</span><span class="repo-stars">&#9733; ${repo.stargazers_count || 0}</span></div>
+            <div class="catalog-card-top"><span class="repo-kind">${repo.category === "ml" ? "ML / data" : repo.category === "systems" ? "Systems" : "Product"}</span><span class="repo-stars">${repo.private ? "Private project" : `&#9733; ${repo.stargazers_count || 0}`}</span></div>
             <h3>${escapeHtml(repo.name)}</h3>
             <p>${escapeHtml(repo.description || "A public project by Abubakar Shahid.")}</p>
-            <a href="${escapeHtml(repo.html_url)}" rel="noreferrer">Open repository <span aria-hidden="true">&#8599;</span></a>
+            ${repo.private ? `<span class="private-label">Private repository</span>` : `<a href="${escapeHtml(repo.html_url)}" rel="noreferrer">Open repository <span aria-hidden="true">&#8599;</span></a>`}
           </article>`).join("") || `<p class="catalog-fallback">No projects match this filter.</p>`;
       };
       filterButtons.forEach((button) => button.addEventListener("click", () => {
@@ -149,8 +156,8 @@
       fetch("https://api.github.com/users/abubakarshahid16/repos?per_page=100&sort=updated")
         .then((response) => response.ok ? response.json() : Promise.reject(new Error("GitHub catalog unavailable")))
         .then((items) => {
-          repositories = items.filter((repo) => !repo.fork && repo.name !== "abubakarshahid16").map((repo) => ({ ...repo, category: classify(repo) }));
-          catalogCount.textContent = `${repositories.length} public projects`;
+          repositories = [...items.filter((repo) => !repo.fork).map((repo) => ({ ...repo, category: classify(repo) })), privateProject];
+          catalogCount.textContent = `${repositories.length} repositories · ${repositories.filter((repo) => !repo.private).length} public · 1 private`;
           renderCatalog();
         })
         .catch(() => {
