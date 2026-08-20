@@ -86,6 +86,22 @@
         </div>
       </section>
 
+      <section class="catalog-section" id="projects" aria-labelledby="catalog-title">
+        <div class="section-heading">
+          <div><p class="eyebrow">Full project collection</p><h2 id="catalog-title">The work beyond Kinora</h2></div>
+          <span class="catalog-count" id="catalog-count">Loading public repositories...</span>
+        </div>
+        <p class="catalog-intro">A living index of public projects across product engineering, data, machine learning, automation, and research. The catalog is loaded from the GitHub profile so it stays current as new work is published.</p>
+        <div class="project-filters" role="group" aria-label="Filter projects">
+          <button class="filter-button is-active" type="button" data-filter="all">All</button>
+          <button class="filter-button" type="button" data-filter="product">Products</button>
+          <button class="filter-button" type="button" data-filter="ml">ML and data</button>
+          <button class="filter-button" type="button" data-filter="systems">Systems</button>
+        </div>
+        <div class="catalog-grid" id="catalog-grid" aria-live="polite"></div>
+        <noscript><p class="catalog-fallback">Enable JavaScript to load the current public repository catalog. Visit <a href="https://github.com/abubakarshahid16?tab=repositories">the GitHub repositories page</a> directly.</p></noscript>
+      </section>
+
       <section class="engineering-section" id="engineering">
         <div class="section-heading"><div><p class="eyebrow">How it is built</p><h2>Engineering at a glance</h2></div></div>
         <div class="engineering-grid">
@@ -101,7 +117,47 @@
       </section>
     </main>
 
-    <footer><span>Kinora Verified</span><span>Built by Abubakar Shahid</span><a href="https://github.com/abubakarshahid16/Kindred">GitHub repository</a></footer>
+    <footer><span>Kinora portfolio</span><span>Built by Abubakar Shahid</span><a href="https://github.com/abubakarshahid16?tab=repositories">All GitHub projects</a></footer>
+    <script>
+      const catalogGrid = document.querySelector("#catalog-grid");
+      const catalogCount = document.querySelector("#catalog-count");
+      const filterButtons = [...document.querySelectorAll("[data-filter]")];
+      let repositories = [];
+      const escapeHtml = (value) => String(value).replace(/[&<>'\"]/g, (character) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", "\"": "&quot;",
+      })[character]);
+      const classify = (repo) => {
+        const text = `${repo.name} ${repo.description || ""}`.toLowerCase();
+        if (/ml|machine|forecast|analytics|data|cnn|rag|emotion|fraud|titanic|augmentation|lake|spotify/.test(text)) return "ml";
+        if (/api|fastapi|pipeline|automation|github|warehouse|system|scraper|integration/.test(text)) return "systems";
+        return "product";
+      };
+      const renderCatalog = (filter = "all") => {
+        const visible = repositories.filter((repo) => filter === "all" || repo.category === filter);
+        catalogGrid.innerHTML = visible.map((repo) => `
+          <article class="catalog-card">
+            <div class="catalog-card-top"><span class="repo-kind">${repo.category === "ml" ? "ML / data" : repo.category === "systems" ? "Systems" : "Product"}</span><span class="repo-stars">&#9733; ${repo.stargazers_count || 0}</span></div>
+            <h3>${escapeHtml(repo.name)}</h3>
+            <p>${escapeHtml(repo.description || "A public project by Abubakar Shahid.")}</p>
+            <a href="${escapeHtml(repo.html_url)}" rel="noreferrer">Open repository <span aria-hidden="true">&#8599;</span></a>
+          </article>`).join("") || `<p class="catalog-fallback">No projects match this filter.</p>`;
+      };
+      filterButtons.forEach((button) => button.addEventListener("click", () => {
+        filterButtons.forEach((item) => item.classList.toggle("is-active", item === button));
+        renderCatalog(button.dataset.filter);
+      }));
+      fetch("https://api.github.com/users/abubakarshahid16/repos?per_page=100&sort=updated")
+        .then((response) => response.ok ? response.json() : Promise.reject(new Error("GitHub catalog unavailable")))
+        .then((items) => {
+          repositories = items.filter((repo) => !repo.fork && repo.name !== "abubakarshahid16").map((repo) => ({ ...repo, category: classify(repo) }));
+          catalogCount.textContent = `${repositories.length} public projects`;
+          renderCatalog();
+        })
+        .catch(() => {
+          catalogCount.textContent = "Browse the public collection on GitHub";
+          catalogGrid.innerHTML = `<p class="catalog-fallback">The live catalog is temporarily unavailable. <a href="https://github.com/abubakarshahid16?tab=repositories">Open all repositories on GitHub</a>.</p>`;
+        });
+    </script>
   </body>
 </html>
 
