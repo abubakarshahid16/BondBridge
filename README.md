@@ -11,14 +11,22 @@ Kinora is a trust-first social relationship app for verified students, professio
   <a href="https://abubakarshahid16.github.io/Kindred/">
     <img alt="Open Kinora PWA" src="https://img.shields.io/badge/Open%20Installable%20PWA-Kinora-405de6?style=for-the-badge">
   </a>
+  <a href="https://abubakarshahid16.github.io/Kindred/portfolio.html">
+    <img alt="Open Kinora portfolio" src="https://img.shields.io/badge/Builder%20Portfolio-Abubakar%20Shahid-111827?style=for-the-badge">
+  </a>
 </p>
 
 ## Live Links
 
 - Installable GitHub Pages PWA: https://abubakarshahid16.github.io/Kindred/
 - Source repository: https://github.com/abubakarshahid16/Kindred
+- Builder portfolio and project case study: https://abubakarshahid16.github.io/Kindred/portfolio.html
 
 GitHub Pages is the public deployment path for Kinora. The repository workflow builds the installable PWA and publishes it to the `gh-pages` branch after `main` changes are merged.
+
+## Portfolio Presentation
+
+Visit the [Kinora portfolio](https://abubakarshahid16.github.io/Kindred/portfolio.html) for the builder profile, project case study, truthful product screenshots, short demo, architecture overview, and delivery links.
 
 ## Screenshots
 

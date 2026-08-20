@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const root = process.cwd();
@@ -163,5 +163,8 @@ await Promise.all([
   writeFile(path.join(output, "icon.svg"), icon),
   writeFile(path.join(output, "sw.js"), serviceWorker),
   writeFile(path.join(output, ".nojekyll"), ""),
+  cp(path.join(root, "portfolio.html"), path.join(output, "portfolio.html")),
+  cp(path.join(root, "portfolio.css"), path.join(output, "portfolio.css")),
+  cp(path.join(root, "docs", "media"), path.join(output, "media"), { recursive: true }),
 ]);
 
