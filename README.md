@@ -1,103 +1,116 @@
-# BondBridge Verified
+# Kinora Verified
 
-A trust-first relationship app for verified students, professionals, families, friendships, and serious connections.
+[![Deploy Kinora PWA](https://github.com/abubakarshahid16/Kindred/actions/workflows/deploy-pages.yml/badge.svg)](https://github.com/abubakarshahid16/Kindred/actions/workflows/deploy-pages.yml)
+![PWA](https://img.shields.io/badge/PWA-installable-405de6)
+![Supabase](https://img.shields.io/badge/backend-Supabase-00a884)
+![No paid APIs required](https://img.shields.io/badge/launch-no_paid_APIs-16a34a)
 
-## Open
+Kinora is a trust-first social relationship app for verified students, professionals, families, friendships, and serious connections. It combines profile verification, mutual-only chat, private attachments, family reminders, respectful message coaching, and browser-native voice/video calls in an installable PWA.
 
-Open `index.html` in a browser for local UI testing. The deployed version runs on an OpenAI Sites worker with backend API routes.
+<p>
+  <a href="https://abubakarshahid16.github.io/Kindred/">
+    <img alt="Open Kinora PWA" src="https://img.shields.io/badge/Open%20Installable%20PWA-Kinora-405de6?style=for-the-badge">
+  </a>
+</p>
 
-Live production site: https://bondbridge-verified-20260813.tabisharshad51.chatgpt.site
+## Live Links
 
-GitHub source and installable Pages app:
+- Installable GitHub Pages PWA: https://abubakarshahid16.github.io/Kindred/
+- Source repository: https://github.com/abubakarshahid16/Kindred
 
-- Source: https://github.com/abubakarshahid16/BondBridge
-- GitHub Pages: https://abubakarshahid16.github.io/BondBridge/
+GitHub Pages is the public deployment path for Kinora. The repository workflow builds the installable PWA and publishes it to the `gh-pages` branch after `main` changes are merged.
 
-## Deploy
+## Screenshots
 
-This folder is connected to OpenAI Sites. `npm run build` creates `dist/server/index.js` and copies `.openai/hosting.json` so the app can be published as a production Sites worker.
+The screenshots below are captured from the actual app build, not mockups.
 
-`npm run build:github-pages` creates `dist/github-pages`, a static installable PWA for GitHub Pages. That static build calls the live free backend at the production site URL for API routes.
+| Landing | Discovery |
+|---|---|
+| ![Kinora landing desktop](docs/media/kinora-landing-desktop.png) | ![Kinora discovery mobile](docs/media/kinora-discover-mobile.png) |
 
-GitHub Actions deploys the installable PWA automatically from `main` to the `gh-pages` branch. Push source changes to GitHub and Pages rebuilds without paid hosting.
+| Chat and safety | Short demo |
+|---|---|
+| ![Kinora chat desktop](docs/media/kinora-chat-desktop.png) | ![Kinora demo GIF](docs/media/kinora-demo.gif) |
 
-## Live Data Rule
+## What Kinora Ships
 
-BondBridge does not seed fake strangers, fake chats, fake reports, or fake family members. Discovery only shows profiles returned by Supabase after real users sign up and pass the verification rules. If the database has no approved users yet, the app shows an honest empty state.
+- Supabase email/password auth with profile sync.
+- Verified-user discovery with gender, role, identity, and one-account trust signals.
+- Mutual connection requests before chat opens.
+- Private chat, attachment uploads, signed file URLs, and respectful-language checks.
+- Browser-native voice and video calls with Supabase Realtime signaling.
+- Optional TURN credential fetching through a Supabase Edge Function.
+- Background Web Push for messages and incoming calls.
+- 24-hour stories backed by profile storage.
+- Family and friend reconnection reminders.
+- Proof upload and verification queue for student/professional review.
+- Safety reporting with admin-only approval/suspension paths.
+- Local data export/reset controls.
+- Installable PWA manifest, service worker, icon, shortcuts, and in-app install button.
+- GitHub Pages static build for the public release.
 
-## SaaS Backend Routes
+## Architecture
 
-- `GET /health`
-- `GET /api/status`
-- `GET /api/profiles`
-- `GET /api/me`
-- `POST /api/profiles/me`
-- `POST /api/auth/signup`
-- `POST /api/auth/login`
-- `POST /api/storage/upload`
-- `POST /api/proof`
-- `GET /api/connections`
-- `POST /api/connections/request`
-- `POST /api/connections/respond`
-- `GET /api/messages`
-- `POST /api/messages`
-- `GET /api/family-reminders`
-- `POST /api/family-reminders`
-- `POST /api/family-reminders/contacted`
-- `GET /api/reports`
-- `POST /api/reports`
-- `POST /api/checkout`
-- `POST /api/identity/session`
-- `POST /api/video/room`
-- `POST /api/moderate`
+Kinora is intentionally simple to run and review:
 
-The Launch page in the app calls these routes and shows whether the free stack is connected.
+- `index.html` loads runtime config, the bundled Supabase client, `config.js`, and `app.js`.
+- `config.js` is the single source of truth for the Kinora brand, runtime config keys, browser storage keys, and production-compatible Supabase bucket identifiers.
+- `app.js` renders the full client app and talks directly to Supabase on static hosting.
+- `build-github-pages.mjs` produces `dist/github-pages`, an installable static PWA.
+- `build.mjs` produces an optional worker package in `dist/server/index.js`; GitHub Pages is the public release path.
+- `supabase-schema.sql`, `RUN-THIS-IN-SUPABASE.sql`, and `supabase/migrations/*` define the database, RLS, storage policies, and production migration path.
+- `supabase/functions/coach` and `supabase/functions/push-send` hold server-side AI/TURN and push-notification logic.
 
-## Included In This V1
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the detailed system map.
 
-- Instagram-style social feed with dark-first layout, white mode toggle, left rail, story circles, post cards, and gradient accents
-- Fully responsive app/web layout that automatically adjusts for phone, tablet, laptop, and desktop screens
-- Installable PWA for Android, iPhone home screen, and desktop browsers
-- Real account page with signup/login calls and no saved passwords or displayed auth tokens
-- Live verified profile sync from Supabase; discovery requires identity, role, gender, and one-account verification
-- Mobile bottom navigation inspired by modern social apps
-- Local story photo upload
-- Public profile photo upload through the `bondbridge-avatars` Supabase Storage bucket
-- Verified stranger live-video lounge with start, end, next, request, screen-share, AI help, and report controls
-- Chat image/file attachments uploaded to private Supabase Storage and returned with signed URLs for accepted participants
-- Simple guided verification flow with Profile, Proof, and Safety steps
-- Proof file upload to private Supabase Storage plus `verification_documents` queue rows
-- Feed posts for verified meeting, family reminders, and safety
-- Trusted-circles rail inspired by social story discovery
-- Verified meet lounge with video-style preview, start, skip, request, translate, screen-share, and report controls
-- Message-request and hidden-words safety patterns
-- Verified profile and proof center
-- Student/professional proof workflow
-- Gender/profile truth and one-account policy UI
-- Global discovery by country, gender, field, and purpose
-- Verified community circles
-- Mutual connection requests backed by Supabase `connections`
-- Respectful chat backed by Supabase `messages` with foul-language blocking
-- AI-style message and relationship coach
-- Family/friend reconnection reminders backed by Supabase `family_reminders`
-- Consent-based call and screen-share request controls
-- Simplified safety center for user-submitted reports/proof; approve, suspend, restore, and resolve stay admin-only
-- Privacy vault with local export/reset controls
-- SaaS Launch Console for Supabase, free browser video, manual proof review, local coach/safety, and privacy readiness
-- Production worker API for auth, live profiles, profile sync, storage uploads, proof queue, connections, messages, family reminders, reports, free beta path checks, authenticated video room creation, and moderation
-- Supabase schema with RLS policies in `supabase-schema.sql`
-- Environment template in `.env.example`
-- PWA manifest, service worker, app icon, and install button served by the production worker
+## Compatibility Notes
 
-## Production Integrations
+Kinora preserves production data identifiers that would break existing users if renamed blindly:
 
-The current production stack avoids paid APIs. Add the Supabase public runtime variables in Sites and the app can launch with:
+- Supabase Storage buckets remain `bondbridge-avatars`, `bondbridge-proofs`, and `bondbridge-chat`.
+- Legacy browser app state keys are migrated into `kinora-verified-live-v1`.
+- Legacy Supabase auth storage is copied from `bondbridge-auth` into `kinora-auth`.
+- Legacy runtime globals such as `BONDBRIDGE_SUPABASE_URL` remain supported as fallbacks.
+- Realtime channel names keep their existing `bondbridge-*` values so mixed deployed clients can still communicate during rollout.
 
-- Supabase for auth, database, storage, and encrypted sync
-- Browser-native WebRTC for camera, microphone, and screen share
-- Supabase `webrtc_rooms` and `webrtc_signals` for authenticated call signaling; room creation requires a signed-in profile with identity, role, gender, and uniqueness verified
-- Supabase Storage buckets: `bondbridge-avatars`, `bondbridge-proofs`, and `bondbridge-chat`
-- Supabase proof queues for student/professional verification review
-- Local respectful-message drafts and foul-language moderation without a model API key
+Apply [supabase/migrations/202608210001_kinora_security_compatibility.sql](supabase/migrations/202608210001_kinora_security_compatibility.sql) after review to rebrand storage policy labels, revoke public execution from trigger-only functions, and add advisor-recommended indexes.
 
-See `PRODUCTION.md` and `.env.example`.
+## Local Development
+
+```bash
+npm run check
+npm run build
+npm run build:github-pages
+```
+
+For local visual testing, build the GitHub Pages output and serve `dist/github-pages` with any static file server.
+
+## Environment
+
+The browser build reads Kinora-prefixed globals first and legacy globals second:
+
+- `KINORA_SUPABASE_URL`
+- `KINORA_SUPABASE_KEY`
+- `KINORA_AI_URL`
+- `KINORA_TURN_URL`
+- `KINORA_VAPID_PUBLIC_KEY`
+
+No paid APIs are required for the core launch stack. Groq and TURN provider secrets are optional Edge Function enhancements.
+
+## Production Checklist
+
+1. Review and merge the Kinora branch.
+2. Run the Supabase migration file in production or through your normal migration flow.
+3. Confirm Supabase advisors no longer report public executable trigger functions or missing foreign-key indexes.
+4. Deploy GitHub Pages from `main`.
+5. Confirm the GitHub Pages URL and install flow from a clean browser profile.
+6. Test signup, verification, discovery, connection request, chat, attachment upload, push subscription, and voice/video calling with two real devices.
+
+See [PRODUCTION.md](PRODUCTION.md) for deployment details and [docs/MIGRATION.md](docs/MIGRATION.md) for rebrand rollout notes.
+
+## Project Workflow
+
+Kinora uses a review-first GitHub workflow. `main` is the release branch; product work belongs on short-lived `feature/`, `fix/`, or `chore/` branches and lands through a pull request. The repository includes automated checks, code ownership, issue forms, a pull request checklist, and milestone guidance in [docs/GITHUB_WORKFLOW.md](docs/GITHUB_WORKFLOW.md).
+
+The delivery milestones are `Kinora launch readiness`, `Kinora production hardening`, and `Kinora public beta`. Maintainers should configure `main` branch protection to require the Kinora checks workflow and an approving review before merging.
+

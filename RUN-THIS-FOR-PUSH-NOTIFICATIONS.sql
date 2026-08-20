@@ -1,8 +1,8 @@
 -- ============================================================================
---  BondBridge — Background Push Notifications setup
+--  Kinora — Background Push Notifications setup
 --
 --  This is what makes a new message "ping" and an incoming call "ring" even
---  when BondBridge is fully closed (tab closed, browser closed) — the same
+--  when Kinora is fully closed (tab closed, browser closed) — the same
 --  behavior WhatsApp/Instagram give you, built with pg_net (lets Postgres
 --  make an outbound HTTP call the instant a row is written, independent of
 --  whether anyone's browser tab is open) + Web Push + a service worker.
@@ -38,12 +38,14 @@ create table if not exists public.push_subscriptions (
 );
 
 alter table public.push_subscriptions enable row level security;
+grant select, insert, update, delete on public.push_subscriptions to authenticated;
 
 drop policy if exists "Users manage their own push subscriptions" on public.push_subscriptions;
 create policy "Users manage their own push subscriptions"
 on public.push_subscriptions for all
-using (auth.uid() = user_id)
-with check (auth.uid() = user_id);
+to authenticated
+using ((select auth.uid()) = user_id)
+with check ((select auth.uid()) = user_id);
 
 create index if not exists push_subscriptions_user_id_idx on public.push_subscriptions(user_id);
 
@@ -81,6 +83,7 @@ begin
   return new;
 end;
 $$;
+revoke execute on function public.notify_new_message() from public, anon, authenticated;
 
 drop trigger if exists trg_notify_new_message on public.messages;
 create trigger trg_notify_new_message
@@ -113,6 +116,7 @@ begin
   return new;
 end;
 $$;
+revoke execute on function public.notify_incoming_call() from public, anon, authenticated;
 
 drop trigger if exists trg_notify_incoming_call on public.webrtc_rooms;
 create trigger trg_notify_incoming_call
@@ -120,3 +124,4 @@ after insert on public.webrtc_rooms
 for each row execute function public.notify_incoming_call();
 
 select 'Push notification triggers installed.' as status;
+

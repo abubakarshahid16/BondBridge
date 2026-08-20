@@ -145,6 +145,12 @@ create index webrtc_rooms_guest_user_id_idx on public.webrtc_rooms (guest_user_i
 create index webrtc_signals_room_id_created_at_idx on public.webrtc_signals (room_id, created_at);
 create index webrtc_signals_sender_id_idx on public.webrtc_signals (sender_id);
 create index webrtc_signals_recipient_id_idx on public.webrtc_signals (recipient_id);
+create index verification_documents_user_id_idx on public.verification_documents (user_id);
+create index messages_sender_id_idx on public.messages (sender_id);
+create index family_reminders_user_id_idx on public.family_reminders (user_id);
+create index reports_reporter_id_idx on public.reports (reporter_id);
+create index reports_reported_user_id_idx on public.reports (reported_user_id);
+create index reports_connection_id_idx on public.reports (connection_id);
 
 create policy "Read verified profiles or own profile"
 on public.profiles for select
@@ -178,61 +184,71 @@ using ((select auth.uid()) = id);
 
 create policy "Users manage own verification documents"
 on public.verification_documents for all
-using (auth.uid() = user_id)
-with check (auth.uid() = user_id);
+to authenticated
+using ((select auth.uid()) = user_id)
+with check ((select auth.uid()) = user_id);
 
 create policy "Users read their own connections"
 on public.connections for select
-using (auth.uid() in (requester_id, recipient_id));
+to authenticated
+using ((select auth.uid()) in (requester_id, recipient_id));
 
 create policy "Users request connections as self"
 on public.connections for insert
-with check (auth.uid() = requester_id);
+to authenticated
+with check ((select auth.uid()) = requester_id);
 
 create policy "Recipients can accept or decline"
 on public.connections for update
-using (auth.uid() in (requester_id, recipient_id))
-with check (auth.uid() in (requester_id, recipient_id));
+to authenticated
+using ((select auth.uid()) in (requester_id, recipient_id))
+with check ((select auth.uid()) in (requester_id, recipient_id));
 
 create policy "Users read messages in their connections"
 on public.messages for select
+to authenticated
 using (
   exists (
     select 1 from public.connections c
     where c.id = connection_id
       and c.status = 'accepted'
-      and auth.uid() in (c.requester_id, c.recipient_id)
+      and (select auth.uid()) in (c.requester_id, c.recipient_id)
   )
 );
 
 create policy "Users send messages in accepted connections"
 on public.messages for insert
+to authenticated
 with check (
-  auth.uid() = sender_id
+  (select auth.uid()) = sender_id
   and exists (
     select 1 from public.connections c
     where c.id = connection_id
       and c.status = 'accepted'
-      and auth.uid() in (c.requester_id, c.recipient_id)
+      and (select auth.uid()) in (c.requester_id, c.recipient_id)
   )
 );
 
 create policy "Users manage own family reminders"
 on public.family_reminders for all
-using (auth.uid() = user_id)
-with check (auth.uid() = user_id);
+to authenticated
+using ((select auth.uid()) = user_id)
+with check ((select auth.uid()) = user_id);
 
 create policy "Users create reports as self"
 on public.reports for insert
-with check (auth.uid() = reporter_id);
+to authenticated
+with check ((select auth.uid()) = reporter_id);
 
 create policy "Users read own reports"
 on public.reports for select
-using (auth.uid() = reporter_id);
+to authenticated
+using ((select auth.uid()) = reporter_id);
 
 create policy "Users read own subscription"
 on public.subscriptions for select
-using (auth.uid() = user_id);
+to authenticated
+using ((select auth.uid()) = user_id);
 
 create policy "Verified users read available or joined video rooms"
 on public.webrtc_rooms for select
@@ -293,7 +309,8 @@ using (
         and p.gender_status = 'verified'
         and p.role_status = 'verified'
         and p.uniqueness_status = 'verified'
-        and p.is_suspended = false
+        and p
+.is_suspended = false
     )
   )
 )
@@ -368,50 +385,63 @@ drop policy if exists "BondBridge chat participants read shared files" on storag
 drop policy if exists "BondBridge users upload own chat files" on storage.objects;
 drop policy if exists "BondBridge users update own chat files" on storage.objects;
 drop policy if exists "BondBridge users delete own chat files" on storage.objects;
+drop policy if exists "Kinora avatars are publicly readable" on storage.objects;
+drop policy if exists "Kinora users upload own avatars" on storage.objects;
+drop policy if exists "Kinora users update own avatars" on storage.objects;
+drop policy if exists "Kinora users delete own avatars" on storage.objects;
+drop policy if exists "Kinora users read own proof files" on storage.objects;
+drop policy if exists "Kinora users upload own proof files" on storage.objects;
+drop policy if exists "Kinora users update own proof files" on storage.objects;
+drop policy if exists "Kinora users delete own proof files" on storage.objects;
+drop policy if exists "Kinora users read own chat files" on storage.objects;
+drop policy if exists "Kinora chat participants read shared files" on storage.objects;
+drop policy if exists "Kinora users upload own chat files" on storage.objects;
+drop policy if exists "Kinora users update own chat files" on storage.objects;
+drop policy if exists "Kinora users delete own chat files" on storage.objects;
 
-create policy "BondBridge avatars are publicly readable"
+create policy "Kinora avatars are publicly readable"
 on storage.objects for select
 to public
 using (bucket_id = 'bondbridge-avatars');
 
-create policy "BondBridge users upload own avatars"
+create policy "Kinora users upload own avatars"
 on storage.objects for insert
 to authenticated
 with check (bucket_id = 'bondbridge-avatars' and (select auth.uid())::text = (storage.foldername(name))[1]);
 
-create policy "BondBridge users update own avatars"
+create policy "Kinora users update own avatars"
 on storage.objects for update
 to authenticated
 using (bucket_id = 'bondbridge-avatars' and (select auth.uid())::text = (storage.foldername(name))[1])
 with check (bucket_id = 'bondbridge-avatars' and (select auth.uid())::text = (storage.foldername(name))[1]);
 
-create policy "BondBridge users delete own avatars"
+create policy "Kinora users delete own avatars"
 on storage.objects for delete
 to authenticated
 using (bucket_id = 'bondbridge-avatars' and (select auth.uid())::text = (storage.foldername(name))[1]);
 
-create policy "BondBridge users read own proof files"
+create policy "Kinora users read own proof files"
 on storage.objects for select
 to authenticated
 using (bucket_id = 'bondbridge-proofs' and (select auth.uid())::text = (storage.foldername(name))[1]);
 
-create policy "BondBridge users upload own proof files"
+create policy "Kinora users upload own proof files"
 on storage.objects for insert
 to authenticated
 with check (bucket_id = 'bondbridge-proofs' and (select auth.uid())::text = (storage.foldername(name))[1]);
 
-create policy "BondBridge users update own proof files"
+create policy "Kinora users update own proof files"
 on storage.objects for update
 to authenticated
 using (bucket_id = 'bondbridge-proofs' and (select auth.uid())::text = (storage.foldername(name))[1])
 with check (bucket_id = 'bondbridge-proofs' and (select auth.uid())::text = (storage.foldername(name))[1]);
 
-create policy "BondBridge users delete own proof files"
+create policy "Kinora users delete own proof files"
 on storage.objects for delete
 to authenticated
 using (bucket_id = 'bondbridge-proofs' and (select auth.uid())::text = (storage.foldername(name))[1]);
 
-create policy "BondBridge chat participants read shared files"
+create policy "Kinora chat participants read shared files"
 on storage.objects for select
 to authenticated
 using (
@@ -429,18 +459,19 @@ using (
   )
 );
 
-create policy "BondBridge users upload own chat files"
+create policy "Kinora users upload own chat files"
 on storage.objects for insert
 to authenticated
 with check (bucket_id = 'bondbridge-chat' and (select auth.uid())::text = (storage.foldername(name))[1]);
 
-create policy "BondBridge users update own chat files"
+create policy "Kinora users update own chat files"
 on storage.objects for update
 to authenticated
 using (bucket_id = 'bondbridge-chat' and (select auth.uid())::text = (storage.foldername(name))[1])
 with check (bucket_id = 'bondbridge-chat' and (select auth.uid())::text = (storage.foldername(name))[1]);
 
-create policy "BondBridge users delete own chat files"
+create policy "Kinora users delete own chat files"
 on storage.objects for delete
 to authenticated
 using (bucket_id = 'bondbridge-chat' and (select auth.uid())::text = (storage.foldername(name))[1]);
+

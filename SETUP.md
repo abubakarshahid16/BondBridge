@@ -1,129 +1,55 @@
-# BondBridge — Setup status
+# Kinora Setup Status
 
-I did the setup through your browser. Here's what's done and the one thing left.
+This repo is configured for a free launch stack: Supabase, browser WebRTC, Web Push, and GitHub Pages.
 
----
+## Already Connected
 
-## ✅ Done — database
+- Supabase project `fpbodwjgypxzqpstwcvo`
+- Auth, profiles, connections, messages, family reminders, reports, WebRTC signaling, storage buckets, and push subscription schema
+- Supabase Edge Function `coach`
+- Supabase Edge Function `push-send`
+- GitHub Pages deploy workflow from `main` to `gh-pages`
 
-Ran against your project and **verified afterwards by querying the database**,
-not just trusting the success message:
+## Current URLs
 
-| Check | Result |
-|---|---|
-| Tables created | 8 |
-| Security (RLS) policies | 21 |
-| Signup trigger active | yes |
-| Realtime-enabled tables | 4 |
-| Storage buckets | 3 |
-| Profile visibility fix applied | yes |
+- GitHub Pages PWA: `https://abubakarshahid16.github.io/Kindred/`
 
-Before running it on your live project I tested the same file on a local
-PostgreSQL 16 database:
+## Local Checks
 
-- runs clean on an empty database, and re-running changes nothing
-- signup auto-creates a profile even from junk data (age `7` → 18,
-  role `Wizard` → Student, blank name → a default) instead of crashing
-- a stranger reads **0** of your private messages and is **blocked** from
-  inserting into a conversation they're not part of
-- logged-out visitors **can** see profiles — this is the fix for the
-  "app looks completely empty" bug
-
-Supabase warned the query was "destructive". It wasn't: the file contains no
-`drop table`, `delete`, or `truncate` — only `drop policy` / `drop trigger`
-lines that the same script immediately recreates. Your database was empty
-anyway.
-
-## ✅ Done — email confirmation turned off
-
-"Confirm email" is now **off** and saved. People can sign up and use the app
-immediately instead of waiting for a confirmation email.
-
-## ✅ Done — AI Coach function deployed
-
-Live at `https://fpbodwjgypxzqpstwcvo.supabase.co/functions/v1/coach`
-
-I also caught and fixed a bug while doing this: the function has "Verify JWT"
-switched on, and your new-style `sb_publishable_` key is **not** a JWT — so
-every Coach call would have failed with a 401. The app now sends the
-signed-in user's session token instead. Fixed, pushed, and deployed.
-
----
-
-## ⚠️ One thing left — you have to do this part
-
-**Add your Groq key as a secret.** The page is already open in your browser:
-
-https://supabase.com/dashboard/project/fpbodwjgypxzqpstwcvo/functions/secrets
-
-- **Name:** `GROQ_API_KEY`
-- **Value:** your `gsk_...` key
-- Click **Save**
-
-**Why I didn't do it:** I don't type API keys into forms. That isn't me being
-overly cautious — while setting this up, a clipboard copy silently failed and
-your Groq key got pasted into the function editor instead of the code. I
-caught it before deploying and wiped it, but that is exactly the failure mode
-that makes me refuse to handle keys. One wrong field and your key is public.
-
-Until you add it, everything else works — the Coach just uses its built-in
-message templates instead of live AI.
-
-### About that near-miss
-
-Your Groq key was sitting in your clipboard, which means it may still be. It
-was never deployed, never committed, and never left your own browser. But
-since it has been pasted around, **consider rotating it** at
-console.groq.com — generate a new key, add the new one as the secret, delete
-the old one. Takes a minute and removes all doubt.
-
----
-
-## Also still needed: keep-alive workflow
-
-The GitHub token you gave me lacks `workflow` scope, so I couldn't commit
-`.github/workflows/keep-supabase-awake.yml`. It's in the repo as
-**`keep-supabase-awake.workflow.txt`**.
-
-GitHub → **Actions** → **New workflow** → **set up a workflow yourself** →
-paste it → commit.
-
-Without it, Supabase free projects sleep after ~7 idle days — and a dead link
-is exactly what a LinkedIn visitor would find weeks after your post.
-
----
-
-## Now test it properly
-
-1. Open **https://abubakarshahid16.github.io/BondBridge/** on your phone
-2. A friend opens it on theirs — different phone, ideally different network
-3. Both sign up
-4. **Discover** → you should see each other
-5. Send a request → they accept
-6. Chat — messages should land in about a second
-7. Try a video call
-
-I could not test signup myself, because creating accounts and entering
-passwords is something I don't do on your behalf. So this step is genuinely
-untested until you run it — tell me exactly which step fails and what you saw.
-
----
-
-## Before you post on LinkedIn
-
-**Approving a verification badge.** Everyone with a complete profile is
-discoverable. Uploading role proof sets them to *pending*. To approve:
-
-```sql
-update public.profiles set role_status = 'verified' where id = 'THE-USER-ID';
+```bash
+npm run check
+npm run build
+npm run build:github-pages
 ```
 
-**Video calls** work browser-to-browser for roughly 75-80% of people. The rest
-are behind strict firewalls or corporate wifi and need a TURN relay server —
-the one piece that isn't free at scale. Don't promise "video for everyone."
+## Production Follow-Up
 
-**Free tier:** 50,000 monthly users, 500MB database, 5GB bandwidth. You are
-nowhere near this.
+1. Review and merge the Kinora branch.
+2. Apply `supabase/migrations/202608210001_kinora_security_compatibility.sql`.
+3. Enable Supabase leaked-password protection before public promotion.
+4. Re-run Supabase advisors.
+5. Test with two real users on separate devices and networks.
+6. Confirm the GitHub Pages URL is the only public product link.
 
-**Test with 3-5 real friends first.** A launch post is one shot — if someone
-clicks and chat is broken, they don't come back.
+## Manual Secrets
+
+Do not commit secrets. Add them only through Supabase or Sites secret management:
+
+- `GROQ_API_KEY` for live AI coach/rewrite/proof sanity checks
+- `METERED_API_KEY` and `METERED_APP_NAME` for more reliable TURN relay
+- `PUSH_FUNCTION_SECRET`, `VAPID_PUBLIC_KEY`, and `VAPID_PRIVATE_KEY` for background push
+
+## Real-World Test Script
+
+1. Open the GitHub Pages PWA on two phones.
+2. Create two accounts.
+3. Complete profile details.
+4. Approve verification in the protected Supabase/admin workflow.
+5. Use Discover to find each other.
+6. Send and accept a connection request.
+7. Send a chat message and an attachment.
+8. Try voice and video calls.
+9. Close one browser and confirm push notifications arrive.
+
+Video calls work best with TURN configured. Without TURN, some mobile and strict Wi-Fi networks may fail because STUN-only WebRTC cannot always cross carrier-grade NAT or firewalls.
+
