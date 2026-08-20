@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Abubakar Shahid's Kinora product portfolio and engineering case study." />
+    <title>Abubakar Shahid | Kinora</title>
+    <link rel="stylesheet" href="./portfolio.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="./portfolio.html" aria-label="Kinora portfolio home">
+        <span class="brand-mark">K</span>
+        <span>Kinora portfolio</span>
+      </a>
+      <nav aria-label="Portfolio navigation">
+        <a href="#about">About</a>
+        <a href="#project">Project</a>
+        <a href="#engineering">Engineering</a>
+        <a class="nav-cta" href="./">Open Kinora</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="intro" id="about">
+        <div class="intro-copy">
+          <p class="eyebrow">Independent product builder</p>
+          <h1>Abubakar Shahid</h1>
+          <p class="lede">I design and build useful digital products where trust, privacy, and thoughtful interaction matter.</p>
+          <div class="actions">
+            <a class="button button-primary" href="#project">Explore the project <span aria-hidden="true">&#8594;</span></a>
+            <a class="button button-secondary" href="https://github.com/abubakarshahid16/Kindred">View source <span aria-hidden="true">&#8599;</span></a>
+          </div>
+        </div>
+        <aside class="profile-panel" aria-label="Builder profile summary">
+          <div class="profile-avatar">AS</div>
+          <div>
+            <strong>Building in public</strong>
+            <p>Product, frontend, backend, realtime systems, and launch operations.</p>
+          </div>
+          <div class="profile-links">
+            <a href="https://github.com/abubakarshahid16">GitHub profile</a>
+            <a href="https://github.com/abubakarshahid16/Kindred/issues">Project board</a>
+          </div>
+        </aside>
+      </section>
+
+      <section class="project-section" id="project">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Featured project</p>
+            <h2>Kinora Verified</h2>
+          </div>
+          <span class="status"><i></i> Live on GitHub Pages</span>
+        </div>
+        <div class="project-grid">
+          <div class="project-story">
+            <p class="project-summary">A trust-first relationship platform for verified students, professionals, families, friendships, and serious connections.</p>
+            <p>Kinora combines mutual connection requests, private chat, proof review, family reminders, respectful message coaching, browser-native calls, and an installable PWA in one focused experience.</p>
+            <div class="metric-row">
+              <div><strong>6+</strong><span>core experiences</span></div>
+              <div><strong>RLS</strong><span>data ownership model</span></div>
+              <div><strong>PWA</strong><span>installable release</span></div>
+            </div>
+            <div class="actions">
+              <a class="button button-primary" href="./">Launch Kinora <span aria-hidden="true">&#8599;</span></a>
+              <a class="button button-secondary" href="https://github.com/abubakarshahid16/Kindred/blob/main/README.md">Read the README <span aria-hidden="true">&#8599;</span></a>
+            </div>
+          </div>
+          <figure class="featured-media">
+            <img src="./media/kinora-landing-desktop.png" alt="Kinora landing screen from the live application" />
+            <figcaption>Actual Kinora landing screen, captured from the deployed application.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="media-section" aria-labelledby="media-title">
+        <div class="section-heading">
+          <div><p class="eyebrow">Product tour</p><h2 id="media-title">See the work</h2></div>
+          <a class="text-link" href="https://github.com/abubakarshahid16/Kindred/tree/main/docs/media">All project media <span aria-hidden="true">&#8599;</span></a>
+        </div>
+        <div class="media-grid">
+          <figure><img src="./media/kinora-discover-mobile.png" alt="Kinora discovery experience on mobile" /><figcaption>Discovery on mobile</figcaption></figure>
+          <figure><img src="./media/kinora-chat-desktop.png" alt="Kinora chat and safety experience" /><figcaption>Chat and safety</figcaption></figure>
+          <figure><img src="./media/kinora-demo.gif" alt="Short Kinora product demonstration" /><figcaption>Short product demo</figcaption></figure>
+        </div>
+      </section>
+
+      <section class="catalog-section" id="projects" aria-labelledby="catalog-title">
+        <div class="section-heading">
+          <div><p class="eyebrow">Full project collection</p><h2 id="catalog-title">The work beyond Kinora</h2></div>
+          <span class="catalog-count" id="catalog-count">Loading public repositories...</span>
+        </div>
+        <p class="catalog-intro">A living index of public projects across product engineering, data, machine learning, automation, and research. The catalog is loaded from the GitHub profile so it stays current as new work is published.</p>
+        <div class="project-filters" role="group" aria-label="Filter projects">
+          <button class="filter-button is-active" type="button" data-filter="all">All</button>
+          <button class="filter-button" type="button" data-filter="product">Products</button>
+          <button class="filter-button" type="button" data-filter="ml">ML and data</button>
+          <button class="filter-button" type="button" data-filter="systems">Systems</button>
+        </div>
+        <div class="catalog-grid" id="catalog-grid" aria-live="polite"></div>
+        <noscript><p class="catalog-fallback">Enable JavaScript to load the current public repository catalog. Visit <a href="https://github.com/abubakarshahid16?tab=repositories">the GitHub repositories page</a> directly.</p></noscript>
+      </section>
+
+      <section class="engineering-section" id="engineering">
+        <div class="section-heading"><div><p class="eyebrow">How it is built</p><h2>Engineering at a glance</h2></div></div>
+        <div class="engineering-grid">
+          <article><span class="card-index">01</span><h3>Trust by default</h3><p>Supabase Auth, row-level security, user-owned storage policies, verification states, reports, and compatibility migrations protect the core workflows.</p><a href="https://github.com/abubakarshahid16/Kindred/blob/main/docs/ARCHITECTURE.md">Architecture <span aria-hidden="true">&#8599;</span></a></article>
+          <article><span class="card-index">02</span><h3>Realtime product work</h3><p>WebRTC calls use Supabase signaling and browser media APIs, with clear permission errors, call states, push notifications, and mobile-friendly fallbacks.</p><a href="https://github.com/abubakarshahid16/Kindred/blob/main/PRODUCTION.md">Production guide <span aria-hidden="true">&#8599;</span></a></article>
+          <article><span class="card-index">03</span><h3>Reviewable delivery</h3><p>GitHub Actions validates builds, GitHub Pages publishes the PWA, and the repository includes security guidance, ownership, issue forms, migration notes, and PR standards.</p><a href="https://github.com/abubakarshahid16/Kindred/blob/main/docs/GITHUB_WORKFLOW.md">Delivery workflow <span aria-hidden="true">&#8599;</span></a></article>
+        </div>
+      </section>
+
+      <section class="next-section">
+        <div><p class="eyebrow">Next chapter</p><h2>From launch to a measured public beta.</h2><p>The roadmap focuses on production hardening, observability, moderation operations, onboarding quality, and responsible rollout.</p></div>
+        <a class="button button-primary" href="https://github.com/abubakarshahid16/Kindred/issues">Follow progress <span aria-hidden="true">&#8599;</span></a>
+      </section>
+    </main>
+
+    <footer><span>Kinora portfolio</span><span>Built by Abubakar Shahid</span><a href="https://github.com/abubakarshahid16?tab=repositories">All GitHub projects</a></footer>
+    <script>
+      const catalogGrid = document.querySelector("#catalog-grid");
+      const catalogCount = document.querySelector("#catalog-count");
+      const filterButtons = [...document.querySelectorAll("[data-filter]")];
+      let repositories = [];
+      const escapeHtml = (value) => String(value).replace(/[&<>'\"]/g, (character) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", "\"": "&quot;",
+      })[character]);
+      const classify = (repo) => {
+        const text = `${repo.name} ${repo.description || ""}`.toLowerCase();
+        if (/ml|machine|forecast|analytics|data|cnn|rag|emotion|fraud|titanic|augmentation|lake|spotify/.test(text)) return "ml";
+        if (/api|fastapi|pipeline|automation|github|warehouse|system|scraper|integration/.test(text)) return "systems";
+        return "product";
+      };
+      const privateProject = {
+        name: "Delta-Lake-Lakehouse-",
+        description: "Private lakehouse architecture project using Delta Lake, Spark, and Airflow orchestration.",
+        category: "ml",
+        private: true,
+        html_url: "https://github.com/abubakarshahid16/Delta-Lake-Lakehouse-",
+      };
+      const renderCatalog = (filter = "all") => {
+        const visible = repositories.filter((repo) => filter === "all" || repo.category === filter);
+        catalogGrid.innerHTML = visible.map((repo) => `
+          <article class="catalog-card">
+            <div class="catalog-card-top"><span class="repo-kind">${repo.category === "ml" ? "ML / data" : repo.category === "systems" ? "Systems" : "Product"}</span><span class="repo-stars">${repo.private ? "Private project" : `&#9733; ${repo.stargazers_count || 0}`}</span></div>
+            <h3>${escapeHtml(repo.name)}</h3>
+            <p>${escapeHtml(repo.description || "A public project by Abubakar Shahid.")}</p>
+            ${repo.private ? `<span class="private-label">Private repository</span>` : `<a href="${escapeHtml(repo.html_url)}" rel="noreferrer">Open repository <span aria-hidden="true">&#8599;</span></a>`}
+          </article>`).join("") || `<p class="catalog-fallback">No projects match this filter.</p>`;
+      };
+      filterButtons.forEach((button) => button.addEventListener("click", () => {
+        filterButtons.forEach((item) => item.classList.toggle("is-active", item === button));
+        renderCatalog(button.dataset.filter);
+      }));
+      fetch("https://api.github.com/users/abubakarshahid16/repos?per_page=100&sort=updated")
+        .then((response) => response.ok ? response.json() : Promise.reject(new Error("GitHub catalog unavailable")))
+        .then((items) => {
+          repositories = [...items.filter((repo) => !repo.fork).map((repo) => ({ ...repo, category: classify(repo) })), privateProject];
+          catalogCount.textContent = `${repositories.length} repositories · ${repositories.filter((repo) => !repo.private).length} public · 1 private`;
+          renderCatalog();
+        })
+        .catch(() => {
+          catalogCount.textContent = "Browse the public collection on GitHub";
+          catalogGrid.innerHTML = `<p class="catalog-fallback">The live catalog is temporarily unavailable. <a href="https://github.com/abubakarshahid16?tab=repositories">Open all repositories on GitHub</a>.</p>`;
+        });
+    </script>
+  </body>
+</html>
+
