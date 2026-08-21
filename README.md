@@ -2,7 +2,7 @@
 
 [![Deploy Kinora PWA](https://github.com/abubakarshahid16/Kindred/actions/workflows/deploy-pages.yml/badge.svg)](https://github.com/abubakarshahid16/Kindred/actions/workflows/deploy-pages.yml)
 
-Kinora is a trust-first social relationship app for verified students, professionals, families, friendships, and serious connections. It combines profile verification, mutual-only chat, private attachments, family reminders, respectful message coaching, and browser-native voice/video calls in an installable PWA.
+Kinora is an AI-assisted, trust-first relationship platform for verified students, professionals, families, friendships, and serious connections. It combines server-side LLM coaching, multimodal proof screening, profile verification, mutual-only chat, private attachments, family reminders, and browser-native voice/video calls in an installable PWA.
 
 
 ## Live Links
@@ -38,6 +38,44 @@ GitHub Pages is the public deployment path for Kinora. The repository workflow b
 - Local data export/reset controls.
 - Installable PWA manifest, service worker, icon, shortcuts, and in-app install button.
 - GitHub Pages static build for the public release.
+
+## AI Product Layer
+
+Kinora uses AI to help people communicate more thoughtfully while keeping trust, consent, and human review at the center.
+
+### Kinora Coach
+
+The server-side **Kinora Coach** uses an OpenAI-compatible Groq API to provide short, respectful message suggestions. It supports:
+
+- conversational coaching for new connections, study partners, friends, professionals, and family
+- language-preserving message improvement, including mixed-language and Roman Urdu messages
+- tone-aware rewriting that preserves the user's meaning instead of replacing it with generic text
+- safety-oriented redirection when a request is sexual, manipulative, aggressive, or pressuring
+- bounded prompts and response sizes to reduce misuse and runaway cost
+
+### Multimodal Trust Assistance
+
+The verification workflow can send an uploaded proof image to a vision-capable model for a first-pass plausibility check. This is deliberately a **sanity filter**, not an identity decision. Every submission remains subject to human review, and an AI outage does not block a legitimate user.
+
+### Secure LLM Integration
+
+LLM provider credentials stay inside the Supabase Edge Function. The browser never receives the provider key. Requests are bounded, the client receives a controlled response, and the core app remains usable when the optional AI service is unavailable.
+
+### Voice and Video Communication
+
+Kinora already supports real-time browser voice/video calls through WebRTC and Supabase Realtime signaling. TURN credentials are fetched server-side when configured, keeping network fallback credentials out of the client.
+
+### Voice Agent Roadmap
+
+A future Kinora voice agent can build on the existing call and AI layers to provide opt-in, consent-based assistance such as:
+
+- voice-first message coaching before a call
+- live accessibility summaries and follow-up notes
+- multilingual conversation support
+- reminders and relationship check-ins
+- human handoff whenever the user requests it
+
+This voice agent is a planned capability, not a claim that the current public build is autonomous. It must ship with explicit consent, visible recording state, data minimization, retention controls, and an immediate stop action.
 
 ## Architecture
 
